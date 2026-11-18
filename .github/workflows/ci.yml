@@ -1,0 +1,34 @@
+name: ci
+on: [push, pull_request]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env: { POSTGRES_PASSWORD: postgres, POSTGRES_DB: featureledger }
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U postgres" --health-interval 3s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -r backend/requirements.txt
+      - name: unit + engine tests
+        run: cd backend && python -m pytest
+      - name: migrate, seed and compute against real Postgres
+        env:
+          ADMIN_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/featureledger
+        run: cd backend && python -m app.migrate
+      - name: RLS blocks reads without a tenant
+        run: |
+          test "$(PGPASSWORD=app_dev_password psql -h localhost -U featureledger_app -d featureledger -tAc 'select count(*) from features')" = "0"
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - run: cd web && npm install --no-audit --no-fund && npm run typecheck && npm run build

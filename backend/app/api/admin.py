@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from typing import Literal
 
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from ..config import config
@@ -79,7 +79,9 @@ async def decide(suggestion_id: str, body: Decision, org: str = Depends(current_
 
 
 @router.post("/manifest/validate")
-async def validate_manifest(text: str = Body(..., media_type="text/plain")):
+async def validate_manifest(request: Request):
+    """Body: the raw features.yaml (any content type)."""
+    text = (await request.body()).decode("utf-8", errors="replace")
     try:
         m = parse_manifest(text)
     except ManifestError as e:

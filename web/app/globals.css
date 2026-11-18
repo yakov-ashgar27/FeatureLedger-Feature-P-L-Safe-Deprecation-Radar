@@ -1,0 +1,17 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root { color-scheme: light; }
+  body { @apply bg-[#f6f5f2] text-ink antialiased; font-feature-settings: "tnum" 1, "cv11" 1; }
+  th { @apply text-left text-[11px] font-medium uppercase tracking-wider text-ink-3; }
+}
+
+@layer components {
+  .card { @apply rounded-xl border border-rule bg-surface; }
+  .btn { @apply inline-flex items-center gap-1.5 rounded-md border border-rule bg-white px-3 py-1.5 text-sm font-medium text-ink hover:bg-[#f1f0ec] disabled:cursor-not-allowed disabled:opacity-40; }
+  .btn-primary { @apply btn border-ink bg-ink text-white hover:bg-[#2b2b2a]; }
+  .label { @apply text-[11px] font-medium uppercase tracking-wider text-ink-3; }
+  .num { font-variant-numeric: tabular-nums; }
+}
