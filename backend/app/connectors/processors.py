@@ -156,7 +156,7 @@ async def _jira(conn, org_id: str, envs: list[dict], manifest: Manifest, failed:
             failed[e["idempotency_key"]] = f"jira normalize: {ex}"[:500]
     await conn.executemany("""
         INSERT INTO work_items (org_id, source, external_id, item_type, kind, priority, opened_at, merged_at, labels)
-        VALUES ($1, 'jira', $2, 'issue', $3::work_kind, $4, coalesce($5::timestamptz, now()), $6::timestamptz, $7)
+        VALUES ($1, 'jira', $2, 'issue', $3::work_kind, $4, coalesce($5, now()), $6, $7)
         ON CONFLICT (org_id, source, external_id) DO UPDATE SET kind = EXCLUDED.kind, priority = EXCLUDED.priority,
             merged_at = EXCLUDED.merged_at, labels = EXCLUDED.labels""", rows)
     # a PR linked to a Bug/Incident is a bug fix even if its title did not say so

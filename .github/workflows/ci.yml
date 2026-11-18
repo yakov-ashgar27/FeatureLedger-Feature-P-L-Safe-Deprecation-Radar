@@ -63,6 +63,7 @@ jobs:
           assert len(rows) == 5, rows
           assert all(i['health'] == 'healthy' for i in rows), 'not all connectors healthy'
           assert all(i['inbox']['dead_letters'] == 0 for i in rows)
+          assert all(i['inbox']['pending'] == 0 for i in rows), 'envelopes left unprocessed'
           "
       - name: manual trigger and sandbox webhook
         run: |
@@ -74,6 +75,18 @@ jobs:
             -d '{"type":"customer.updated","data":{"object":{"object":"customer","id":"cus_ci_test","email":"x@ci-example.com","metadata":{"company_name":"CI Example","tier":"pro"}}}}'
           code=$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://localhost:8000/api/v1/webhooks/stripe/$STRIPE" -d '{}')
           test "$code" = "401"
+      - name: webhook envelope is processed, nothing pending or dead-lettered
+        run: |
+          for i in $(seq 1 30); do
+            out=$(curl -fs http://localhost:8000/api/v1/integrations | python3 -c "
+          import json, sys
+          rows = [i for i in json.load(sys.stdin)['integrations'] if i['kind'] != 'github']
+          print(sum(i['inbox']['pending'] for i in rows), sum(i['inbox']['dead_letters'] for i in rows))")
+            echo "pending dead = $out"
+            [ "$out" = "0 0" ] && exit 0
+            sleep 4
+          done
+          docker compose logs worker | tail -50; exit 1
       - name: dashboard pages render through the proxy
         run: |
           for p in / /features/legacy-pdf-export /simulator /sunset /mappings /integrations; do

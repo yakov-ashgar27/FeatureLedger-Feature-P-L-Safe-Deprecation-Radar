@@ -11,7 +11,7 @@ from datetime import date, datetime
 from typing import Any
 
 from ..core.manifest import Manifest
-from .jira import kind_of, priority_of
+from .jira import kind_of, parse_jira_ts, priority_of
 from .stitching import AccountIndex, Match, resolve
 from .stripe_billing import account_state, monthly_mrr_from_invoices
 from .zendesk import handle_minutes
@@ -166,6 +166,8 @@ def cost_month(rows: list[dict], manifest: Manifest) -> dict[tuple[str | None, s
 
 # ------------------------------------------------------------------------- Jira
 def jira_row(issue: dict[str, Any], manifest: Manifest) -> dict[str, Any]:
+    # datetimes, not strings: the database driver binds timestamptz parameters as datetime objects
     return {"key": issue["key"], "kind": kind_of(issue), "priority": priority_of(issue),
-            "created": issue.get("created"), "resolved": issue.get("resolved"),
+            "created": parse_jira_ts(issue["created"]) if issue.get("created") else None,
+            "resolved": parse_jira_ts(issue["resolved"]) if issue.get("resolved") else None,
             "labels": issue.get("labels") or [], "feature_key": feature_for_jira(issue, manifest)}

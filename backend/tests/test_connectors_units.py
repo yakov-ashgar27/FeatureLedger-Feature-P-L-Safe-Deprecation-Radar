@@ -234,3 +234,10 @@ def test_sync_ctx_envelope_carries_identity():
     ctx = SyncCtx("o", "i", clock=lambda: datetime(2026, 11, 1, tzinfo=timezone.utc))
     e = ctx.envelope("jira_issue", "NW-1", "v", {"key": "NW-1"})
     assert e.idempotency_key == idempotency_key("i", "jira_issue", "NW-1", "v")
+
+
+def test_jira_row_binds_datetimes_not_strings():
+    from app.connectors.normalize import jira_row
+    r = jira_row({"key": "NW-1", "issuetype": "Bug", "priority": "High", "created": "2026-10-03T09:12:44.000+0000",
+                  "resolved": None, "labels": []}, M)
+    assert isinstance(r["created"], datetime) and r["resolved"] is None and r["kind"] == "bug"
