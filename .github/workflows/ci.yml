@@ -148,3 +148,6 @@ jobs:
           curl -fs http://localhost:3000/api/v1/periods
       - if: failure()
         run: docker compose logs
+      - name: worker stage timings
+        if: always()
+        run: docker compose logs worker | grep -E "done in|: (stripe|zendesk|posthog|jira|aws_cost_explorer) |processed [0-9]+ envelopes|sync_org_job" | tail -40
