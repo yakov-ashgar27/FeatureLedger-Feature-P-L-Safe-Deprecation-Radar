@@ -15,8 +15,8 @@ export default async function LedgerPage({ searchParams }: { searchParams: Promi
   const sp = await searchParams;
   const model = sp.model ?? "usage_weighted";
   const view = sp.view ?? "contribution";
-  const window = sp.window ?? "3";
-  const qs = new URLSearchParams({ model, view, window, ...(sp.period ? { period: sp.period } : {}) });
+  const win = sp.window ?? "3";
+  const qs = new URLSearchParams({ model, view, window: win, ...(sp.period ? { period: sp.period } : {}) });
 
   let data: Ledger;
   try {
@@ -44,7 +44,7 @@ export default async function LedgerPage({ searchParams }: { searchParams: Promi
               { value: "critical_dependency", label: "Revenue at risk" }]} />
             <Segmented param="view" value={view} options={[
               { value: "contribution", label: "Contribution" }, { value: "fully_loaded", label: "Fully loaded" }]} />
-            <Segmented param="window" value={window} options={[
+            <Segmented param="window" value={win} options={[
               { value: "1", label: "1 mo" }, { value: "3", label: "3 mo" }, { value: "6", label: "6 mo" }]} />
           </div>
         </Suspense>

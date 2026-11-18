@@ -10,7 +10,7 @@ export default function SimulatorPage() {
   const [rows, setRows] = useState<LedgerRow[]>([]);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [success, setSuccess] = useState(0.7);
-  const [window, setWindow] = useState(3);
+  const [win, setWin] = useState(3);
   const [migrationCost, setMigrationCost] = useState(0);
   const [res, setRes] = useState<SimulationResult | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -27,11 +27,11 @@ export default function SimulatorPage() {
     if (!picked.size) { setRes(null); return; }
     const t = setTimeout(() => {
       apiPost<SimulationResult>("/api/v1/simulate", {
-        feature_keys: [...picked], window, migration_success: success, one_off_migration_cost: migrationCost,
+        feature_keys: [...picked], window: win, migration_success: success, one_off_migration_cost: migrationCost,
       }).then((r) => { setRes(r); setErr(null); }).catch((e) => setErr(e.message));
     }, 200);
     return () => clearTimeout(t);
-  }, [picked, success, window, migrationCost]);
+  }, [picked, success, win, migrationCost]);
 
   const sorted = useMemo(() => [...rows].sort((a, b) => a.net_roi - b.net_roi), [rows]);
   const toggle = (k: string) => setPicked((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; });
@@ -66,8 +66,8 @@ export default function SimulatorPage() {
           <div className="card grid gap-5 p-4 sm:grid-cols-3">
             <Slider label="Customers who migrate successfully" value={success} min={0} max={1} step={0.05}
               fmt={pct} onChange={setSuccess} />
-            <Slider label="Averaging window (months)" value={window} min={1} max={6} step={1}
-              fmt={(v) => String(v)} onChange={setWindow} />
+            <Slider label="Averaging window (months)" value={win} min={1} max={6} step={1}
+              fmt={(v) => String(v)} onChange={setWin} />
             <Slider label="One-off migration cost" value={migrationCost} min={0} max={200000} step={5000}
               fmt={usdShort} onChange={setMigrationCost} />
           </div>

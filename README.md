@@ -1,5 +1,10 @@
 # FeatureLedger: Feature P&L & Safe Deprecation Radar
 
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/yakov-ashgar27/FeatureLedger-Feature-P-L-Safe-Deprecation-Radar?quickstart=1)
+[![ci](https://github.com/yakov-ashgar27/FeatureLedger-Feature-P-L-Safe-Deprecation-Radar/actions/workflows/ci.yml/badge.svg)](https://github.com/yakov-ashgar27/FeatureLedger-Feature-P-L-Safe-Deprecation-Radar/actions/workflows/ci.yml)
+
+**Run it with one click:** press *Open in GitHub Codespaces*. The whole stack builds and starts in the cloud, and the dashboard opens by itself in 3–6 minutes. Nothing to install.
+
 FeatureLedger gives every in-house product feature a monthly **profit & loss** statement. It joins
 engineering effort (Git), support load, cloud and LLM spend, and tenant-level usage and ARR.
 It then turns a "Zombie" verdict into a **guarded, reversible deletion workflow**.

@@ -11,7 +11,7 @@ const LINKS = [
 ];
 
 export function Nav() {
-  const path = usePathname();
+  const path = usePathname() ?? "/";
   return (
     <nav className="sticky top-0 flex h-screen w-60 shrink-0 flex-col border-r border-rule bg-surface px-4 py-6">
       <Link href="/" className="mb-8 block px-2">

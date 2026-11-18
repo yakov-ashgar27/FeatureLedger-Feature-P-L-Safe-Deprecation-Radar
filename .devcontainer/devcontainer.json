@@ -1,0 +1,22 @@
+{
+  "name": "FeatureLedger",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+    "ghcr.io/devcontainers/features/python:1": { "version": "3.12" },
+    "ghcr.io/devcontainers/features/node:1": { "version": "22" }
+  },
+  "hostRequirements": { "cpus": 2, "memory": "8gb" },
+  "postCreateCommand": "cp -n .env.example .env || true",
+  "postStartCommand": "bash .devcontainer/start.sh",
+  "forwardPorts": [3000, 8000],
+  "portsAttributes": {
+    "3000": { "label": "FeatureLedger dashboard", "onAutoForward": "openBrowser" },
+    "8000": { "label": "API (OpenAPI at /docs)", "onAutoForward": "silent" },
+    "5432": { "label": "PostgreSQL", "onAutoForward": "ignore" }
+  },
+  "customizations": {
+    "codespaces": { "openFiles": ["docs/GETTING_STARTED.he.md"] },
+    "vscode": { "extensions": ["ms-python.python", "redhat.vscode-yaml", "bradlc.vscode-tailwindcss"] }
+  }
+}

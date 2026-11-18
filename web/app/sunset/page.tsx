@@ -18,7 +18,7 @@ export default function Page() {
 function SunsetBoard() {
   const sp = useSearchParams();
   const router = useRouter();
-  const selected = sp.get("plan");
+  const selected = sp?.get("plan") ?? null;
   const [plans, setPlans] = useState<SunsetPlan[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const load = useCallback(() => apiGet<SunsetPlan[]>("/api/v1/sunset-plans").then(setPlans).catch((e) => setErr(e.message)), []);

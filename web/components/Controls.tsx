@@ -13,7 +13,7 @@ export function Segmented({ param, options, value }: { param: string; options: O
       {options.map((o) => (
         <button key={o.value}
           onClick={() => {
-            const next = new URLSearchParams(sp.toString());
+            const next = new URLSearchParams(sp?.toString() ?? "");
             next.set(param, o.value);
             router.push(`${path}?${next.toString()}`);
           }}

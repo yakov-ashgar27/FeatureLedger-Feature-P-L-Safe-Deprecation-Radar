@@ -3,6 +3,9 @@ WORKDIR /app
 COPY web/package.json ./
 RUN npm install --no-audit --no-fund
 COPY web/ ./
+# rewrites are resolved at build time: point them at the compose service
+ARG API_URL=http://api:8000
+ENV API_URL=$API_URL NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
 FROM node:22-alpine
