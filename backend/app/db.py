@@ -28,7 +28,9 @@ async def _init_conn(conn: asyncpg.Connection) -> None:
 async def init_pool(dsn: str | None = None) -> asyncpg.Pool:
     global _pool
     if _pool is None:
-        _pool = await asyncpg.create_pool(dsn or config.database_url, min_size=1, max_size=10, init=_init_conn)
+        # jit=off: short OLTP statements (and asyncpg's type introspection) must not pay LLVM compile time
+        _pool = await asyncpg.create_pool(dsn or config.database_url, min_size=1, max_size=10, init=_init_conn,
+                                          server_settings={"jit": "off"})
     return _pool
 
 

@@ -151,4 +151,4 @@ jobs:
       - name: worker stage timings
         if: always()
         run: |
-          docker compose logs worker | grep -E "done in|sync [0-9a-f-]+: |sync_org_job" | tail -40
+          docker compose logs worker | grep -E "done in|sync [0-9a-f-]+: |tier3: |sync_org_job" | tail -40

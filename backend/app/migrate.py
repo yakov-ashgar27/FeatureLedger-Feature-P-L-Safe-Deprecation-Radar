@@ -108,7 +108,7 @@ async def main(seed: bool) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     for attempt in range(30):  # wait for postgres in docker-compose
         try:
-            conn = await asyncpg.connect(config.admin_database_url)
+            conn = await asyncpg.connect(config.admin_database_url, server_settings={"jit": "off"})
             break
         except (OSError, asyncpg.CannotConnectNowError):
             await asyncio.sleep(1 + attempt * 0.2)

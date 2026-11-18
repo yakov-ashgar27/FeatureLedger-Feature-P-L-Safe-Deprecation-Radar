@@ -84,6 +84,8 @@ async def run_graph(conn, org_id: str, vault: TextVault | None = None, embedder=
         timings[name] = round(now - t, 2)
         t = now
         log.info("graph %s: %s done in %.2fs", org_id, name, timings[name])
+    # one graph run per org at a time (worker after sync / push, hourly job, API trigger)
+    await conn.execute("SELECT pg_advisory_xact_lock(hashtext('featureledger:graph:' || $1))", org_id)
     manifest = await active_manifest(conn)
     resolver = await load_resolver(conn, manifest)
     before = await reallocate(conn, org_id, resolver)

@@ -126,7 +126,9 @@ async def write_result(conn: asyncpg.Connection, org_id: str, res: PnlResult, ds
 
 
 async def recompute(conn: asyncpg.Connection, org_id: str, months: list[date] | None = None) -> dict:
-    """Run inside an org-scoped transaction."""
+    """Run inside an org-scoped transaction. Serialized per org: concurrent recomputes (worker + API) queue
+    on a transaction-level advisory lock instead of colliding on the ledger's primary keys."""
+    await conn.execute("SELECT pg_advisory_xact_lock(hashtext('featureledger:pnl:' || $1))", org_id)
     months = months or await available_months(conn)
     if not months:
         return {"months": 0}
@@ -144,7 +146,7 @@ async def recompute(conn: asyncpg.Connection, org_id: str, months: list[date] | 
 async def recompute_org(org_id: str, dsn: str | None = None) -> dict:
     from ..config import config
     from ..db import _init_conn
-    conn = await asyncpg.connect(dsn or config.database_url)
+    conn = await asyncpg.connect(dsn or config.database_url, server_settings={"jit": "off"})
     try:
         await _init_conn(conn)
         async with conn.transaction():

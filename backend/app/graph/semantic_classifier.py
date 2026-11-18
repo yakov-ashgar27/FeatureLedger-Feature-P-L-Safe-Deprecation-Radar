@@ -14,8 +14,10 @@ Confidence = calibrated similarity to the best centroid, discounted by a small m
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
+import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
@@ -24,6 +26,7 @@ from ..core.manifest import FeatureSpec, Manifest
 from .embeddings import Embedder, cosine, default_embedder, to_pgvector, words
 from .precedence import AUTO_CONFIRM
 
+log = logging.getLogger("featureledger.tier3")
 CALIBRATION = {  # (similarity floor, similarity span, margin span) per embedding family
     "hashing": (0.06, 0.25, 0.16),
     "default": (0.20, 0.35, 0.10),
@@ -235,16 +238,21 @@ async def run_semantic(conn, org_id: str, manifest: Manifest, vault: TextVault |
         return stats
     embedder = embedder or default_embedder()
     explainer = explainer or default_explainer()
+    t0 = time.monotonic()
     try:
         items = await collect_items(conn, vault)
     finally:
         vault.clear()   # texts not needed by any item are dropped here, before anything else happens
+    log.info("tier3: collected %d unmapped subjects in %.2fs", len(items), time.monotonic() - t0)
     if not items:
         return stats
     pg = await has_pgvector(conn)
     cents = await centroids(manifest, embedder, await _human_examples(conn, embedder.model) if pg else None)
+    t0 = time.monotonic()
     results = await classify(items, manifest, embedder, explainer, cents)   # wipes every item.text
+    log.info("tier3: embedded and classified %d in %.2fs (%s)", len(results), time.monotonic() - t0, embedder.model)
     fids = {r["key"]: r["id"] for r in await conn.fetch("SELECT id, key FROM features")}
+    t0 = time.monotonic()
     if pg:
         await conn.executemany("""
             INSERT INTO feature_embeddings (feature_id, org_id, model, embedding) VALUES ($1, $2, $3, $4::vector)
@@ -258,6 +266,8 @@ async def run_semantic(conn, org_id: str, manifest: Manifest, vault: TextVault |
                 embedding = EXCLUDED.embedding, created_at = now()""",
             [(org_id, c.item.subject_type, c.item.subject_id, embedder.model, to_pgvector(c.vector)) for c in results])
         stats["embeddings_stored"] = len(results)
+    log.info("tier3: stored %d embeddings in %.2fs", stats["embeddings_stored"], time.monotonic() - t0)
+    t0 = time.monotonic()
     for c in results:
         stats["classified"] += 1
         fid = fids.get(c.feature_key)
@@ -283,6 +293,7 @@ async def run_semantic(conn, org_id: str, manifest: Manifest, vault: TextVault |
             {"similarity": c.similarity, "runner_up": c.runner_up, "runner_up_similarity": c.runner_up_similarity,
              "model": embedder.model, "threshold": AUTO_CONFIRM},
             auto, fid if auto else None)
+    log.info("tier3: applied %d decisions in %.2fs", len(results), time.monotonic() - t0)
     return stats
 
 
