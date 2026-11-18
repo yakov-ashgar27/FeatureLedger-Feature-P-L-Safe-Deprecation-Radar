@@ -22,6 +22,9 @@ class Config:
         "MIGRATIONS_DIR", Path(__file__).resolve().parents[2] / "db" / "migrations")))
     manifest_path: Path = field(default_factory=lambda: Path(os.environ.get(
         "FEATURES_MANIFEST", Path(__file__).resolve().parents[2] / "features.yaml")))
+    # Phase 2: connectors read fixture APIs built from the seed company instead of live vendors
+    sandbox_mode: bool = field(default_factory=lambda: _bool(os.environ.get("SANDBOX_MODE"), True))
+    redis_url: str = field(default_factory=lambda: os.environ.get("REDIS_URL", "redis://localhost:6379/0"))
     seed_on_start: bool = field(default_factory=lambda: _bool(os.environ.get("SEED_ON_START"), True))
     default_org_slug: str = field(default_factory=lambda: os.environ.get("DEFAULT_ORG_SLUG", "northwind"))
     # real-data mode (SEED_ON_START=false): the organization created on first start

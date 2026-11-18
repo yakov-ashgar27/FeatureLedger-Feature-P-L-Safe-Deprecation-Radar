@@ -52,6 +52,7 @@ async def provision_app_role(conn: asyncpg.Connection) -> None:
         GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {APP_ROLE};
         GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {APP_ROLE};
         GRANT EXECUTE ON FUNCTION resolve_org_slug(text) TO {APP_ROLE};
+        GRANT EXECUTE ON FUNCTION list_sync_targets() TO {APP_ROLE};
         REVOKE UPDATE, DELETE ON sunset_audit_logs FROM {APP_ROLE};
         REVOKE INSERT, UPDATE, DELETE ON schema_migrations FROM {APP_ROLE};
         ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {APP_ROLE};
@@ -63,7 +64,9 @@ async def seed_if_empty(conn: asyncpg.Connection) -> str | None:
         return None
     from .seed.generate import build
     seed = build(config.manifest_path.read_text())
-    await conn.execute(seed.sql)  # the script carries its own BEGIN/COMMIT
+    # sandbox mode: only org, teams, features and PRs; the Phase 2 connectors bring customers, usage,
+    # tickets and costs through the real sync pipeline on the worker's first run
+    await conn.execute(seed.sql_core if config.sandbox_mode else seed.sql)  # carries its own BEGIN/COMMIT
     log.info("seeded org %s", seed.org_id)
     return seed.org_id
 
@@ -78,6 +81,24 @@ async def bootstrap_real_org(conn: asyncpg.Connection) -> str:
         stats = await apply_manifest(conn, org_id, manifest)
     log.info("org %s (%s): applied features.yaml %s", config.default_org_slug, org_id, stats)
     return org_id
+
+
+async def ensure_live_integrations(conn: asyncpg.Connection, org_id: str) -> list[str]:
+    """Create/upgrade an integration row for every connector whose credentials are in the environment."""
+    from .connectors.registry import SUPPORTED, live_configured
+    names = {"stripe": "Stripe", "jira": "Jira", "posthog": "PostHog", "zendesk": "Zendesk",
+             "aws_cost_explorer": "AWS Cost Explorer"}
+    enabled = []
+    async with conn.transaction():
+        await conn.execute("SELECT set_config('app.org_id', $1, true)", org_id)
+        for kind in SUPPORTED:
+            if live_configured(kind):
+                await conn.execute("""
+                    INSERT INTO integrations (org_id, kind, status, display_name, sandbox) VALUES ($1, $2, 'active', $3, false)
+                    ON CONFLICT (org_id, kind) DO UPDATE SET sandbox = false, status = 'active', last_error = NULL""",
+                    org_id, kind, names[kind])
+                enabled.append(kind)
+    return enabled
 
 
 async def main(seed: bool) -> None:
@@ -98,6 +119,12 @@ async def main(seed: bool) -> None:
             org_id = await seed_if_empty(conn)
         else:
             org_id = await bootstrap_real_org(conn)
+        target = org_id or await conn.fetchval("SELECT id::text FROM organizations WHERE slug = $1",
+                                               config.default_org_slug)
+        if target:
+            live = await ensure_live_integrations(conn, target)
+            if live:
+                log.info("live connectors enabled: %s", live)
     finally:
         await conn.close()
     if org_id:

@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .api import admin, imports, pnl, sunset
+from .api import admin, imports, integrations, pnl, sunset
 from .config import config
 from .db import close_pool, init_pool, org_tx
 
@@ -23,11 +23,12 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="FeatureLedger API", version="0.1.0", lifespan=lifespan,
               description="Feature-level P&L and Safe Deprecation Radar")
 app.add_middleware(CORSMiddleware, allow_origins=list(config.cors_origins), allow_credentials=False,
-                   allow_methods=["GET", "POST"], allow_headers=["Authorization", "Content-Type", "X-Org-Slug"])
+                   allow_methods=["GET", "POST"], allow_headers=["Authorization", "Content-Type", "X-Org-Slug", "Stripe-Signature", "X-Hub-Signature"])
 app.include_router(pnl.router)
 app.include_router(sunset.router)
 app.include_router(admin.router)
 app.include_router(imports.router)
+app.include_router(integrations.router)
 
 
 @app.get("/health")

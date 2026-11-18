@@ -135,14 +135,6 @@ async def github_sync(body: GitHubSyncIn, tasks: BackgroundTasks, org: str = Dep
     return {"status": "accepted", "repo": body.repo}
 
 
-@router.get("/integrations")
-async def integrations(org: str = Depends(current_org)):
-    async with org_tx(org) as conn:
-        rows = await conn.fetch("""SELECT id, kind::text AS kind, status::text AS status, display_name, last_synced_at,
-                                          last_error FROM integrations ORDER BY kind""")
-    return [row(r) for r in rows]
-
-
 @router.get("/settings")
 async def settings(org: str = Depends(current_org)):
     async with org_tx(org) as conn:

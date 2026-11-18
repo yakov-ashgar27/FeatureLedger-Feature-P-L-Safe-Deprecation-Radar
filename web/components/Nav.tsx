@@ -8,6 +8,7 @@ const LINKS = [
   { href: "/simulator", label: "What-if simulator", sub: "Reclaimable capacity" },
   { href: "/sunset", label: "Safe Sunset", sub: "Deprecation pipeline" },
   { href: "/mappings", label: "Feature Graph", sub: "Mapping triage" },
+  { href: "/integrations", label: "Integrations", sub: "Sync health" },
 ];
 
 export function Nav() {

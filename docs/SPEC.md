@@ -1,4 +1,4 @@
-# FeatureLedger: Phase 1 specification (as built)
+# FeatureLedger: specification (as built, Phases 1–2)
 
 This document describes what the code in this repository does, and why. Every formula below has
 a unit test in `backend/tests/`, and the section numbers are referenced from code comments.
@@ -213,11 +213,64 @@ The scatter uses categorical slots 1–3 (blue `#2a78d6`, orange `#eb6834`, aqua
 - Regulatory features are classified `mandated` and blocked from sunset.
 - Untagged infra spend and unmapped engineering hours are surfaced as data-quality KPIs, never hidden.
 
-## 10. Not in Phase 1 (next)
+## 10. Phase 2: live connectors
 
-- Jira/Linear, PostHog, Stripe, Zendesk and AWS live connectors. Until then, CSV imports cover accounts, usage, tickets and costs. The schema and inbox are ready for the live versions.
+| Source | API | Streams (cursor) | What it feeds |
+| --- | --- | --- | --- |
+| Stripe | Customers, Subscriptions, Invoices, Events | list backfill (`starting_after`), then `/v1/events` (`created[gt]`) | accounts, ARR, tier, renewal, monthly ARR history |
+| Jira | REST v3 `search/jql` | `issues` (`updated`, 1-minute overlap) | PR kind and priority via linked keys; label/epic ownership for unmapped PRs |
+| PostHog | Groups API + Query API (HogQL) | `groups` (full refresh), `usage` (month) | `usage_signals`, `account_activity_monthly` |
+| Zendesk | Organizations + incremental ticket export (`include=metric_sets`) | `organizations`, `tickets` (`after_cursor`) | `support_tickets`, handle time, triage of untagged tickets |
+| AWS Cost Explorer | `GetCostAndUsage` by TAG `feature` × SERVICE | `costs` (month; restated months re-read) | `cost_events` (infra, LLM for Bedrock/SageMaker) |
+
+**Contract.** `Connector.backfill(ctx, stream)` and `Connector.incremental(ctx, stream, cursor)` yield `Batch(envelopes, cursor)`. `handle_webhook` turns a verified webhook into envelopes, or into a sync trigger. The runner writes a batch's envelopes to `ingest_inbox` (primary key = sha256 idempotency key) and upserts the stream cursor **in the same transaction**.
+
+**Scrubbing.** Allowlists per source (`connectors/scrub.py`). Assignees, reporters, requesters, emails (only the domain survives, for stitching), contact names, descriptions and comment threads never reach storage. The sandbox APIs include those fields on purpose, so every sandbox sync re-tests the scrubbers.
+
+**Identity stitching** (`connectors/stitching.py`) tries, in order:
+1. A recorded identity in `account_identities`.
+2. For Stripe, the customer id itself (`accounts.external_ref`).
+3. A unique email or web domain. Free-mail domains never match, and an ambiguous domain is not guessed.
+
+Matches by domain are recorded as identities. Unmatched PostHog groups book their usage to the synthetic `__unresolved__` account, which is shown as a data gap.
+
+**Processing** (`connectors/processors.py`) runs in bulk and in dependency order:
+1. Stripe.
+2. Stitching for Zendesk organizations and PostHog groups.
+3. Jira.
+4. Zendesk tickets.
+5. PostHog months, then AWS months.
+
+Stripe accounts and PostHog/AWS months are rebuilt from the latest version of every envelope, so replays and restatements converge. A normalization error fails one envelope; a SQL error rolls back that handler's savepoint. After 5 attempts an envelope is dead-lettered. The Sync Health view lists dead letters and can re-queue them.
+
+**Worker.** ARQ on Redis:
+- A cron job runs every 15 minutes, plus once at startup, and enqueues one `sync_org_job` per org with due integrations. Jobs are de-duplicated by `sync:<org>`.
+- Each job syncs in dependency order, processes the inbox, and recomputes the P&L when anything new landed.
+- Token buckets live in Redis (atomic Lua) and are shared across workers.
+- Requests back off on 429 and 5xx, honoring `Retry-After` and `X-RateLimit-Reset`, with full-jitter exponential backoff and up to 6 attempts.
+
+**Sandbox mode** (`SANDBOX_MODE=true`, the default). The seed loads only the organization, teams, features and PRs. The five connectors then fetch customers, usage, tickets, issues and costs from vendor-shaped fixture APIs built from the same seed. `tests/test_connectors_roundtrip.py` proves that the ledger produced this way equals the Phase 1 ledger for every feature and month.
+
+**Webhooks.** `POST /api/v1/webhooks/{kind}/{integration_id}`, verified per vendor:
+
+| Source | Verification |
+| --- | --- |
+| Stripe | `Stripe-Signature` (with a timestamp tolerance) |
+| Zendesk | `X-Zendesk-Webhook-Signature` |
+| Jira | `X-Hub-Signature` |
+| PostHog | Shared secret |
+| Sandbox | Shared secret `sandbox` |
+
+**Sync Health API.**
+- `GET /api/v1/integrations` returns health, cursors, inbox counts and recent runs for each integration.
+- `POST /api/v1/integrations/{id}/sync` triggers a sync.
+- `GET /api/v1/integrations/{id}/dead-letters` lists dead letters, and `POST /api/v1/integrations/{id}/dead-letters/retry` re-queues them.
+
+## 11. Not built yet (Phases 3–4)
+
+- Linear, Mixpanel/Amplitude, HubSpot/Salesforce, Intercom and GCP connectors (same contract as the Phase 2 five).
 - Tier 2 import-graph clustering and Tier 3 embedding jobs (the tables and triage loop exist).
 - Pulling `features.yaml` from the repo on push.
 - LaunchDarkly/Statsig flag toggling and evaluation counts.
 - Opening the cleanup PR through the GitHub API (outline only today).
-- OIDC/SSO, per-user roles, KMS-backed token encryption (the columns exist), and a Redis/worker queue for scheduled syncs.
+- OIDC/SSO, per-user roles, and KMS-backed token encryption (the columns exist; Phase 2 reads credentials from the environment).

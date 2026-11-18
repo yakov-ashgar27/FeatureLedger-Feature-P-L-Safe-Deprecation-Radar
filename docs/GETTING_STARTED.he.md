@@ -271,6 +271,50 @@ Windows: אותן פקודות, עם `curl.exe` במקום `curl`, וגרשיי�
 
 ---
 
+## חלק ג׳2: חיבור אוטומטי למקורות (Phase 2), במקום קובצי CSV
+
+המערכת מתחברת לבד ל-**Stripe, Jira, PostHog, Zendesk ו-AWS** ומסנכרנת כל 15 דקות.
+
+### בדמו (ברירת המחדל): בלי חשבונות בתשלום
+- ב-`.env` מוגדר `SANDBOX_MODE=true`. החיבורים קוראים מ-API לדוגמה שמחקה את הספקים האמיתיים.
+- אחרי ההפעלה נכנסים למסך **Integrations** (בתפריט משמאל). תוך כדקה כל חמשת המקורות עוברים ל-**Healthy**, והטבלה במסך הראשי מתמלאת.
+- הכפתור **Trigger sync** מריץ סנכרון מיידי.
+
+### חיבור אמיתי: מה לרשום ב-`.env`
+משנים ל-`SANDBOX_MODE=false`, וממלאים רק את המקורות שיש לכם. מקור שלא ממלאים מופיע כ-*Not configured* ולא מפריע לשאר.
+
+| מקור | איפה מוציאים את המפתח | מה לרשום ב-`.env` |
+| --- | --- | --- |
+| **Stripe** | Developers, ואז API keys, ואז **Create restricted key**. נותנים הרשאת Read ל-Customers, Subscriptions, Invoices ו-Events | `STRIPE_API_KEY=rk_live_...` |
+| **Jira** | https://id.atlassian.com/manage-profile/security/api-tokens, ואז **Create API token** | `JIRA_BASE_URL=https://yourco.atlassian.net`<br>`JIRA_EMAIL=you@yourco.com`<br>`JIRA_API_TOKEN=...`<br>`JIRA_PROJECTS=ENG,APP` (לא חובה) |
+| **PostHog** | Settings, ואז Personal API keys, ואז **Create**, עם הרשאות query:read ו-group:read. מספר הפרויקט מופיע בכתובת `/project/<מספר>` | `POSTHOG_PROJECT_ID=12345`<br>`POSTHOG_PERSONAL_API_KEY=phx_...` |
+| **Zendesk** | Admin Center, אחר כך Apps and integrations, ואז Zendesk API. מפעילים Token access ולוחצים **Add API token** | `ZENDESK_SUBDOMAIN=yourco`<br>`ZENDESK_EMAIL=you@yourco.com`<br>`ZENDESK_API_TOKEN=...` |
+| **AWS** | IAM: יוצרים משתמש עם הרשאה `ce:GetCostAndUsage`. ב-Billing, תחת Cost allocation tags, מפעילים את התג `feature` | `AWS_ACCESS_KEY_ID=...`<br>`AWS_SECRET_ACCESS_KEY=...` |
+
+אחר כך:
+```
+docker compose up -d --build
+```
+ונכנסים למסך **Integrations**:
+- הסנכרון הראשון מושך 6 חודשים אחורה (אפשר לשנות ב-`CONNECTOR_BACKFILL_MONTHS`).
+- ליד כל מקור רואים סטטוס, זמן הסנכרון האחרון, היכן הסנכרון עצר (cursor), וכמה פריטים עובדו או נכשלו.
+
+**כדי שהמערכת תדע לאיזה פיצ'ר כל נתון שייך, צריך לוודא ש:**
+- ב-PostHog, האירועים (events) מופיעים תחת `events` ב-`features.yaml`, והאירועים נשלחים עם group של חברה (group type 0).
+- ב-Zendesk, הטיקטים מתויגים בתגית ששווה ל-key של הפיצ'ר, או לתגית שמופיעה ב-`support_tags`.
+- ב-AWS, משאבי הענן מתויגים `feature=<key>`.
+- ב-Jira, ה-PRs כוללים את מפתח הכרטיס (למשל `ENG-123`) בכותרת או בתיאור.
+
+**פרטיות:** מ-Jira לא נשמרים שמות אנשים או טקסט. מ-Zendesk לא נשמרים פונים, נציגים או שרשור השיחה. מ-Stripe נשמר רק הדומיין של המייל.
+
+### Webhooks (לא חובה, לעדכון מהיר יותר)
+בכל מקור מגדירים webhook לכתובת:
+`https://<הכתובת-שלכם>/api/v1/webhooks/<stripe|jira|zendesk>/<מזהה-החיבור>`
+את מזהה החיבור רואים ב-`http://localhost:8000/api/v1/integrations`. ב-`.env` רושמים את הסוד של כל webhook: `STRIPE_WEBHOOK_SECRET`, `JIRA_WEBHOOK_SECRET` ו-`ZENDESK_WEBHOOK_SECRET`.
+גם בלי webhooks הכול מתעדכן כל 15 דקות.
+
+---
+
 ## חלק ד׳: פתרון תקלות
 
 | בעיה | פתרון |
@@ -282,7 +326,10 @@ Windows: אותן פקודות, עם `curl.exe` במקום `curl`, וגרשיי�
 | `features in features.yaml but not in the database` | מריצים `manifest/apply` (שלב 2). |
 | `account_ref(s) not found` | קודם מייבאים accounts, ורק אחר כך usage. |
 | GitHub sync לא מביא כלום | בודקים שהטוקן מורשה לריפו הנכון ושה-`paths` ב-features.yaml תואמים לנתיבים האמיתיים בריפו. |
-| הכול מסומן Watch | חסרים נתוני לקוחות ושימוש, או שיש רק חודש אחד. ראו שלב 4. |
+| הכול מסומן Watch | חסרים נתוני לקוחות ושימוש, או שיש רק חודש אחד. ראו שלב 4. בדמו: מחכים דקה לסנכרון הראשון (מסך Integrations). |
+| חיבור במצב Failing במסך Integrations | השגיאה מופיעה בכרטיס. לרוב המפתח שגוי או חסרה הרשאה. מתקנים ב-`.env` ומריצים `docker compose up -d`. |
+| Dead letters | פריטים שנכשלו 5 פעמים. לוחצים **Show dead letters** כדי לראות את הסיבה, ואחרי התיקון לוחצים **Retry all**. |
+| "the sync queue (Redis) is not reachable" | שירות ה-Redis לא עלה. מריצים `docker compose ps` ואז `docker compose up -d`. |
 
 ---
 

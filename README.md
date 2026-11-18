@@ -11,7 +11,9 @@ It then turns a "Zombie" verdict into a **guarded, reversible deletion workflow*
 
 **מדריך הפעלה מלא בעברית, צעד אחר צעד:** [`docs/GETTING_STARTED.he.md`](docs/GETTING_STARTED.he.md)
 
-This is **Phase 1 (MVP v0.1)**. It runs locally out of the box with a realistic seed company:
+**Phase 2 is in:** live connectors for **Stripe, Jira, PostHog, Zendesk and AWS Cost Explorer**, with a Redis/ARQ worker that syncs every 15 minutes, and an **Integrations & Sync Health** screen. In the default **sandbox mode** the connectors read realistic fixture APIs, so everything runs without paid accounts.
+
+It runs locally out of the box with a realistic seed company:
 *Northwind Cloud*, 45 engineers in 7 teams, ~520 accounts, ~$14M ARR, 22 features and 6 months of history.
 
 ```bash
@@ -20,6 +22,20 @@ docker compose up --build        # first start: migrate → seed → compute P&L
 open http://localhost:3000       # dashboard
 open http://localhost:8000/docs  # API (OpenAPI)
 ```
+
+## Phase 2: connectors
+
+| Source | What FeatureLedger reads | Feeds |
+| --- | --- | --- |
+| Stripe | customers, subscriptions, invoices, events | accounts, ARR, tier, renewal, ARR history |
+| Jira | issues (type, priority, labels; no people, no text) | bug/incident classification of PRs, label ownership |
+| PostHog | company groups + monthly HogQL aggregates | feature usage per paying account |
+| Zendesk | organizations + tickets (tags, handle time; no thread) | support cost per feature, triage queue |
+| AWS Cost Explorer | monthly cost by `feature` tag × service | infra and LLM cost per feature |
+
+- **Sandbox (default):** `SANDBOX_MODE=true`. On first start the worker syncs all five from vendor-shaped fixture APIs, and the ledger fills in within about a minute. Open **Integrations** to watch it.
+- **Live:** set `SANDBOX_MODE=false` and fill in the credentials for any source in `.env`. Each one is listed there with the exact read-only scopes it needs. Then restart. Sources you don't configure show as *Not configured*.
+- **Guarantees:** allowlist scrubbing (no assignees, reporters, emails, names or ticket threads); idempotent inbox with the cursor committed alongside each batch; identity stitching (Stripe id, PostHog group, Zendesk org, email domain, with unmatched usage booked to `__unresolved__`); Redis token buckets; backoff with jitter; dead letters after 5 attempts; P&L recomputed after every sync that brings something new.
 
 ## What you'll see on the seed data
 
@@ -43,11 +59,13 @@ Legacy PDF tear-sheet.
 db/migrations/        PostgreSQL DDL: partitions, RLS, hash-chained audit log, optional pgvector
 backend/app/core/     pure P&L engine: effort, attribution, pnl, manifest, sunset, simulate
 backend/app/ingest/   GitHub ingester + allowlist scrubber (no author identity, no source code)
+backend/app/connectors/  Phase 2: Stripe, Jira, PostHog, Zendesk, AWS CE + sandbox APIs, runner, processors
+backend/app/worker.py ARQ worker: 15-minute schedule, manual and webhook triggers
 backend/app/jobs/     P&L job: DB → engine → ledger tables
 backend/app/api/      FastAPI routes
 backend/app/seed/     deterministic Northwind Cloud generator
-backend/tests/        48 tests: formulas, guards, scrubber, seed end-to-end invariants
-web/                  Next.js 15 dashboard: ledger + quadrant, tear-sheet, simulator, sunset board, triage
+backend/tests/        69 tests: formulas, guards, scrubber, seed end-to-end invariants
+web/                  Next.js 15 dashboard: ledger + quadrant, tear-sheet, simulator, sunset board, triage, sync health
 features.yaml         Tier 1 Feature Graph manifest (teams + features) for the seed company
 templates/            CSV templates: accounts, usage, tickets, costs
 docs/SPEC.md          formulas, state machine, API, design decisions

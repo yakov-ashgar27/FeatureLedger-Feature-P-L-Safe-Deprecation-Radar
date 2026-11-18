@@ -14,15 +14,29 @@ services:
       timeout: 3s
       retries: 20
 
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
   api:
     build: { context: ., dockerfile: backend/Dockerfile }
-    depends_on: { db: { condition: service_healthy } }
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    env_file: { path: .env, required: false }
     environment:
       # migrations + seed as the owner; requests as the RLS-bound app role
       ADMIN_DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/featureledger
       DATABASE_URL: postgresql://featureledger_app:${APP_DB_PASSWORD:-app_dev_password}@db:5432/featureledger
       APP_DB_PASSWORD: ${APP_DB_PASSWORD:-app_dev_password}
       SEED_ON_START: ${SEED_ON_START:-true}
+      SANDBOX_MODE: ${SANDBOX_MODE:-true}
+      REDIS_URL: redis://redis:6379/0
       DEFAULT_ORG_SLUG: ${DEFAULT_ORG_SLUG:-northwind}
       ORG_NAME: ${ORG_NAME:-My Company}
       FL_API_TOKEN: ${FL_API_TOKEN:-}
@@ -37,6 +51,22 @@ services:
       interval: 5s
       timeout: 3s
       retries: 30
+
+  # background syncs: every 15 minutes + manual/webhook triggers; rate limits shared through Redis
+  worker:
+    build: { context: ., dockerfile: backend/Dockerfile }
+    command: ["arq", "app.worker.WorkerSettings"]
+    depends_on:
+      api: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    env_file: { path: .env, required: false }
+    environment:
+      DATABASE_URL: postgresql://featureledger_app:${APP_DB_PASSWORD:-app_dev_password}@db:5432/featureledger
+      SANDBOX_MODE: ${SANDBOX_MODE:-true}
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./features.yaml:/srv/features.yaml:ro
+    restart: unless-stopped
 
   web:
     build: { context: ., dockerfile: web/Dockerfile }

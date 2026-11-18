@@ -6,7 +6,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/ /srv/backend/
 COPY db/ /srv/db/
 COPY features.yaml /srv/features.yaml
-ENV MIGRATIONS_DIR=/srv/db/migrations FEATURES_MANIFEST=/srv/features.yaml
+ENV MIGRATIONS_DIR=/srv/db/migrations FEATURES_MANIFEST=/srv/features.yaml PYTHONPATH=/srv/backend
 RUN useradd --system --uid 10001 app && chown -R app /srv
 USER app
 EXPOSE 8000

@@ -1,0 +1,176 @@
+"""Integrations & Sync Health, manual triggers, dead letters, and inbound webhooks."""
+from __future__ import annotations
+
+import os
+from datetime import datetime, timezone
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+
+from ..config import config
+from ..connectors import webhooks as wh
+from ..connectors.base import SyncCtx
+from ..connectors.ratelimit import MemoryBucketStore
+from ..connectors.registry import build, live_configured
+from ..connectors.runner import write_envelopes
+from ..db import org_tx
+from .deps import current_org, row
+
+router = APIRouter(prefix="/api/v1", tags=["integrations"])
+_arq = None
+
+
+async def _queue():
+    """ARQ pool, created lazily so the API still serves reads when Redis is down."""
+    global _arq
+    if _arq is None:
+        try:
+            from arq import create_pool
+            from arq.connections import RedisSettings
+            _arq = await create_pool(RedisSettings.from_dsn(config.redis_url))
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(503, f"the sync queue (Redis) is not reachable: {e}") from e
+    return _arq
+
+
+def _health(i: dict[str, Any], last_run: dict[str, Any] | None) -> str:
+    if i["status"] == "disabled":
+        return "disabled"
+    if last_run and last_run["status"] == "running":
+        return "syncing"
+    if i["status"] == "pending" and not i["sandbox"] and not live_configured(i["kind"]):
+        return "not_configured"
+    if last_run is None:
+        return "waiting"
+    if last_run["status"] == "failed":
+        return "failing"
+    if last_run["status"] == "partial":
+        return "degraded"
+    last = i["last_synced_at"]
+    if last and (datetime.now(timezone.utc) - last).total_seconds() > i["sync_interval_minutes"] * 60 * 3:
+        return "stale"
+    return "healthy"
+
+
+@router.get("/integrations")
+async def integrations(org: str = Depends(current_org)):
+    async with org_tx(org) as conn:
+        rows = [dict(r) for r in await conn.fetch("""
+            SELECT id, kind::text AS kind, status::text AS status, display_name, sandbox, sync_interval_minutes,
+                   last_synced_at, last_error FROM integrations ORDER BY kind""")]
+        cursors = await conn.fetch("SELECT integration_id, entity_type, cursor, updated_at FROM sync_cursors")
+        inbox = await conn.fetch("""
+            SELECT integration_id,
+                   count(*) FILTER (WHERE processed_at IS NULL AND dead_lettered_at IS NULL) AS pending,
+                   count(*) FILTER (WHERE processed_at IS NOT NULL) AS processed,
+                   count(*) FILTER (WHERE dead_lettered_at IS NOT NULL) AS dead_letters
+              FROM ingest_inbox GROUP BY integration_id""")
+        runs = await conn.fetch("""
+            SELECT * FROM (SELECT r.*, row_number() OVER (PARTITION BY integration_id ORDER BY started_at DESC) rn
+                             FROM sync_runs r) x WHERE rn <= 8 ORDER BY started_at DESC""")
+    by_c: dict[str, list] = {}
+    for c in cursors:
+        by_c.setdefault(str(c["integration_id"]), []).append(row(c))
+    by_i = {str(r["integration_id"]): row(r) for r in inbox}
+    by_r: dict[str, list] = {}
+    for r in runs:
+        by_r.setdefault(str(r["integration_id"]), []).append(dict(r))
+    out = []
+    for i in rows:
+        iid = str(i["id"])
+        recent = by_r.get(iid, [])
+        d = row(i)
+        d["health"] = "manual" if i["kind"] == "github" else _health(i, recent[0] if recent else None)
+        d["live_configured"] = live_configured(i["kind"])
+        d["cursors"] = by_c.get(iid, [])
+        d["inbox"] = by_i.get(iid, {"pending": 0, "processed": 0, "dead_letters": 0})
+        d["recent_runs"] = [row({k: v for k, v in r.items() if k not in ("rn", "org_id", "integration_id")})
+                            for r in recent]
+        out.append(d)
+    return {"integrations": out, "sandbox_mode": config.sandbox_mode}
+
+
+async def _integration(conn, iid: str) -> dict[str, Any]:
+    r = await conn.fetchrow("SELECT id, kind::text AS kind, config, sandbox, status::text AS status "
+                            "FROM integrations WHERE id = $1", iid)
+    if not r:
+        raise HTTPException(404, "integration not found")
+    return dict(r)
+
+
+@router.post("/integrations/{integration_id}/sync", status_code=202)
+async def trigger_sync(integration_id: str, org: str = Depends(current_org)):
+    async with org_tx(org) as conn:
+        i = await _integration(conn, integration_id)
+    if i["kind"] == "github":
+        raise HTTPException(422, "GitHub syncs through POST /api/v1/integrations/github/sync")
+    q = await _queue()
+    job = await q.enqueue_job("sync_org_job", org, [integration_id], "manual", _job_id=f"sync:{org}")
+    return {"queued": job is not None,
+            "message": "sync queued" if job else "a sync for this organization is already running; it will pick this up"}
+
+
+@router.get("/integrations/{integration_id}/dead-letters")
+async def dead_letters(integration_id: str, org: str = Depends(current_org)):
+    async with org_tx(org) as conn:
+        rows = await conn.fetch("""SELECT idempotency_key, entity_type, external_id, attempts, last_error, received_at,
+                                          dead_lettered_at FROM ingest_inbox
+                                    WHERE integration_id = $1 AND dead_lettered_at IS NOT NULL
+                                    ORDER BY dead_lettered_at DESC LIMIT 100""", integration_id)
+    return [row(r) for r in rows]
+
+
+@router.post("/integrations/{integration_id}/dead-letters/retry")
+async def retry_dead_letters(integration_id: str, org: str = Depends(current_org)):
+    async with org_tx(org) as conn:
+        n = await conn.fetchval("""WITH x AS (UPDATE ingest_inbox SET dead_lettered_at = NULL, attempts = 0, last_error = NULL
+                                    WHERE integration_id = $1 AND dead_lettered_at IS NOT NULL RETURNING 1)
+                                    SELECT count(*) FROM x""", integration_id)
+    q = await _queue()
+    await q.enqueue_job("process_job", org, _job_id=f"process:{org}")
+    return {"requeued": n}
+
+
+# ----------------------------------------------------------------------------------------- webhooks
+def _verify(kind: str, sandbox: bool, request: Request, body: bytes) -> None:
+    h = request.headers
+    if sandbox:
+        wh.verify_shared_secret("sandbox", h.get("x-featureledger-secret"))
+        return
+    secret = os.environ.get({"stripe": "STRIPE_WEBHOOK_SECRET", "zendesk": "ZENDESK_WEBHOOK_SECRET",
+                             "jira": "JIRA_WEBHOOK_SECRET", "posthog": "POSTHOG_WEBHOOK_SECRET"}.get(kind, "_"), "")
+    if not secret:
+        raise HTTPException(412, f"no webhook secret configured for {kind}")
+    if kind == "stripe":
+        wh.verify_stripe(secret, h.get("stripe-signature"), body)
+    elif kind == "zendesk":
+        wh.verify_zendesk(secret, h.get("x-zendesk-webhook-signature"), h.get("x-zendesk-webhook-signature-timestamp"), body)
+    elif kind == "jira":
+        wh.verify_hub_signature(secret, h.get("x-hub-signature"), body)
+    else:
+        wh.verify_shared_secret(secret, h.get("x-featureledger-secret"))
+
+
+@router.post("/webhooks/{kind}/{integration_id}", status_code=202)
+async def webhook(kind: str, integration_id: str, request: Request, org: str = Depends(current_org)):
+    body = await request.body()
+    async with org_tx(org) as conn:
+        i = await _integration(conn, integration_id)
+    if i["kind"] != kind or kind == "aws_cost_explorer":
+        raise HTTPException(404, "no webhook for this integration")
+    try:
+        _verify(kind, bool(i["sandbox"]), request, body)
+    except wh.BadSignature as e:
+        raise HTTPException(401, f"webhook rejected: {e}") from e
+    built = build(kind, org, integration_id, i["config"] or {}, bool(i["sandbox"]), MemoryBucketStore(),
+                  config.manifest_path.read_text()) if (i["sandbox"] or live_configured(kind)) else None
+    ctx = built.ctx if built else SyncCtx(org, integration_id)
+    envs = built.connector.handle_webhook(ctx, dict(request.headers), body) if built else []
+    q = await _queue()
+    if envs:
+        async with org_tx(org) as conn:
+            new = await write_envelopes(conn, org, envs)
+        await q.enqueue_job("process_job", org, _job_id=f"process:{org}")
+        return {"accepted": len(envs), "new": new, "action": "process"}
+    await q.enqueue_job("sync_org_job", org, [integration_id], "webhook", _job_id=f"sync:{org}")
+    return {"accepted": 0, "action": "sync"}

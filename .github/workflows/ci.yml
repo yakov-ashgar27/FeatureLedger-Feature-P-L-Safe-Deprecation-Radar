@@ -45,12 +45,38 @@ jobs:
         run: |
           for i in $(seq 1 90); do curl -fs http://localhost:3000 >/dev/null && exit 0; sleep 5; done
           docker compose ps; docker compose logs api web; exit 1
-      - name: API answers with the seeded ledger
+      - name: worker syncs the five sandbox connectors and the ledger fills in
         run: |
-          curl -fs "http://localhost:8000/api/v1/pnl?window=3" | python3 -c "import json,sys; d=json.load(sys.stdin); z=[f['key'] for f in d['features'] if f['classification']=='zombie']; print('zombies:', z); assert 'legacy-pdf-export' in z"
+          for i in $(seq 1 60); do
+            z=$(curl -fs "http://localhost:8000/api/v1/pnl?window=3" | python3 -c "import json,sys; d=json.load(sys.stdin); print(','.join(f['key'] for f in d['features'] if f['classification']=='zombie'))" || true)
+            echo "attempt $i zombies=[$z]"
+            case "$z" in *legacy-pdf-export*) break;; esac
+            sleep 5
+          done
+          case "$z" in *legacy-pdf-export*) ;; *) docker compose logs worker; exit 1;; esac
+          curl -fs http://localhost:8000/api/v1/integrations | python3 -c "
+          import json, sys
+          d = json.load(sys.stdin)
+          rows = [i for i in d['integrations'] if i['kind'] != 'github']
+          for i in rows:
+              print(i['kind'], i['health'], i['inbox'])
+          assert len(rows) == 5, rows
+          assert all(i['health'] == 'healthy' for i in rows), 'not all connectors healthy'
+          assert all(i['inbox']['dead_letters'] == 0 for i in rows)
+          "
+      - name: manual trigger and sandbox webhook
+        run: |
+          IDS=$(curl -fs http://localhost:8000/api/v1/integrations)
+          STRIPE=$(echo "$IDS" | python3 -c "import json,sys; print([i['id'] for i in json.load(sys.stdin)['integrations'] if i['kind']=='stripe'][0])")
+          curl -fs -X POST "http://localhost:8000/api/v1/integrations/$STRIPE/sync"
+          curl -fs -X POST "http://localhost:8000/api/v1/webhooks/stripe/$STRIPE" -H "X-FeatureLedger-Secret: sandbox" \
+            -H "Content-Type: application/json" \
+            -d '{"type":"customer.updated","data":{"object":{"object":"customer","id":"cus_ci_test","email":"x@ci-example.com","metadata":{"company_name":"CI Example","tier":"pro"}}}}'
+          code=$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://localhost:8000/api/v1/webhooks/stripe/$STRIPE" -d '{}')
+          test "$code" = "401"
       - name: dashboard pages render through the proxy
         run: |
-          for p in / /features/legacy-pdf-export /simulator /sunset /mappings; do
+          for p in / /features/legacy-pdf-export /simulator /sunset /mappings /integrations; do
             curl -fs "http://localhost:3000$p" -o /dev/null && echo "ok $p"
           done
           curl -fs http://localhost:3000/api/v1/periods
