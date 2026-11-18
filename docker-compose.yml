@@ -1,4 +1,30 @@
-# FeatureLedger Phase 1: `docker compose up --build`, then open http://localhost:3000
+# FeatureLedger: `docker compose up --build`, then open http://localhost:3000
+# Connector credentials are read from .env (optional): only the variables you set are used.
+x-connector-env: &connector-env
+  CONNECTOR_BACKFILL_MONTHS: ${CONNECTOR_BACKFILL_MONTHS:-6}
+  FX_RATES_TO_USD: ${FX_RATES_TO_USD:-}
+  STRIPE_API_KEY: ${STRIPE_API_KEY:-}
+  STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+  JIRA_BASE_URL: ${JIRA_BASE_URL:-}
+  JIRA_EMAIL: ${JIRA_EMAIL:-}
+  JIRA_API_TOKEN: ${JIRA_API_TOKEN:-}
+  JIRA_PROJECTS: ${JIRA_PROJECTS:-}
+  JIRA_WEBHOOK_SECRET: ${JIRA_WEBHOOK_SECRET:-}
+  POSTHOG_HOST: ${POSTHOG_HOST:-https://us.posthog.com}
+  POSTHOG_PROJECT_ID: ${POSTHOG_PROJECT_ID:-}
+  POSTHOG_PERSONAL_API_KEY: ${POSTHOG_PERSONAL_API_KEY:-}
+  POSTHOG_GROUP_TYPE_INDEX: ${POSTHOG_GROUP_TYPE_INDEX:-0}
+  POSTHOG_WEBHOOK_SECRET: ${POSTHOG_WEBHOOK_SECRET:-}
+  ZENDESK_SUBDOMAIN: ${ZENDESK_SUBDOMAIN:-}
+  ZENDESK_EMAIL: ${ZENDESK_EMAIL:-}
+  ZENDESK_API_TOKEN: ${ZENDESK_API_TOKEN:-}
+  ZENDESK_TIME_SPENT_FIELD_ID: ${ZENDESK_TIME_SPENT_FIELD_ID:-}
+  ZENDESK_WEBHOOK_SECRET: ${ZENDESK_WEBHOOK_SECRET:-}
+  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+  AWS_REGION: ${AWS_REGION:-us-east-1}
+  AWS_CE_TAG_KEY: ${AWS_CE_TAG_KEY:-feature}
+
 services:
   db:
     image: pgvector/pgvector:pg16
@@ -28,8 +54,8 @@ services:
     depends_on:
       db: { condition: service_healthy }
       redis: { condition: service_healthy }
-    env_file: { path: .env, required: false }
     environment:
+      <<: *connector-env
       # migrations + seed as the owner; requests as the RLS-bound app role
       ADMIN_DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/featureledger
       DATABASE_URL: postgresql://featureledger_app:${APP_DB_PASSWORD:-app_dev_password}@db:5432/featureledger
@@ -59,9 +85,10 @@ services:
     depends_on:
       api: { condition: service_healthy }
       redis: { condition: service_healthy }
-    env_file: { path: .env, required: false }
     environment:
+      <<: *connector-env
       DATABASE_URL: postgresql://featureledger_app:${APP_DB_PASSWORD:-app_dev_password}@db:5432/featureledger
+      FEATURES_MANIFEST: /srv/features.yaml
       SANDBOX_MODE: ${SANDBOX_MODE:-true}
       REDIS_URL: redis://redis:6379/0
     volumes:
