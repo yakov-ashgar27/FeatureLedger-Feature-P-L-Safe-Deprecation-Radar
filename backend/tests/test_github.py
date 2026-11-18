@@ -74,3 +74,10 @@ def test_parse_next_link():
     h = '<https://api.github.com/x?page=2>; rel="next", <https://api.github.com/x?page=9>; rel="last"'
     assert parse_next_link(h) == "https://api.github.com/x?page=2"
     assert parse_next_link('<https://api.github.com/x?page=9>; rel="last"') is None
+
+
+def test_pr_title_is_used_for_kind_but_never_stored():
+    pr = dict(RAW_PR, labels=[], title="hotfix: auth loop for Jane Doe")
+    n = normalize_pr("acme/web", pr, FILES, REVIEWS, MANIFEST)
+    assert n.kind is WorkKind.HOTFIX
+    assert "Jane" not in json.dumps(n.__dict__, default=str) and "auth loop" not in json.dumps(n.__dict__, default=str)

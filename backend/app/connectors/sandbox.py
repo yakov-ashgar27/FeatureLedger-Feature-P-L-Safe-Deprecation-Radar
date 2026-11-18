@@ -75,7 +75,25 @@ def _world(manifest_text: str) -> dict[str, Any]:
     org_id = {a.id: 360_000_000_000 + i for i, a in enumerate(accounts)}
     return {"seed": seed, "MONTHS": MONTHS, "feats": feats, "spec": spec, "accounts": accounts, "by_id": by_id,
             "group_key": group_key, "org_id": org_id, "domain": account_domain, "stripe_ref": stripe_ref,
-            "pr_issue_key": pr_issue_key, "csm": ex["csm"], "tickets": ex["ticket_rows"], "prs": ex["wi_rows"]}
+            "pr_issue_key": pr_issue_key, "csm": ex["csm"], "tickets": ex["ticket_rows"], "prs": ex["wi_rows"],
+            "hints": ex["ticket_hints"], "demo_prs": ex["demo_prs"]}
+
+
+CLEAR = ["{name} keeps failing for us: {ev} does nothing", "Since this week {ev} in {name} is broken for several users",
+         "How do we configure {name}? {ev} behaves strangely", "{name}: {ev} shows an error for our admins"]
+VAGUE = ["Something stopped working after yesterday's update", "Our users are confused, can someone call us back?",
+         "Weird behaviour on our account since Monday", "Can you check what is going on with our workspace?"]
+PII = "Hi, this is Jane Doe (jane.doe@example.com, +1 555 0100). "
+
+
+def ticket_text(tn: int, f, spec, conf: float) -> tuple[str, str]:
+    """Untagged ticket text: clearly about its feature when the seed marked it fairly confident, else vague."""
+    if f is not None and conf >= 0.68:
+        ev = (spec.events[0] if spec.events else f.key).replace("_", " ")
+        subject = CLEAR[tn % len(CLEAR)].format(name=f.name, ev=ev)
+        return subject, PII + f"{subject}. It worked last month. Please look at {f.name.lower()} for our account."
+    subject = VAGUE[tn % len(VAGUE)]
+    return subject, PII + subject + " Thanks."
 
 
 def _page(items: list[Any], limit: int, after_id: str | None, key: str = "id") -> tuple[list[Any], bool]:
@@ -187,12 +205,18 @@ def zendesk_router(manifest_text: str) -> Router:
     for t in sorted(w["tickets"], key=lambda t: (t["solved"], t["external_id"])):
         tid = int(t["external_id"].split("-")[1])
         f = w["feats"].get(t["feature"]) if t["feature"] else None
+        if f is None:
+            hint_fid, conf = w["hints"].get(t["id"], (None, 0.0))
+            hf = w["feats"].get(hint_fid)
+            subject, description = ticket_text(tid, hf, w["spec"][hf.key] if hf else None, conf)
+        else:
+            subject = f"Problem with {f.name}"
+            description = PII + f"{subject}: my export is broken."
         tickets.append({
             "id": tid, "created_at": t["created"].strftime("%Y-%m-%dT%H:%M:%SZ"),
             "updated_at": t["solved"].strftime("%Y-%m-%dT%H:%M:%SZ"),
             "organization_id": w["org_id"].get(t["account"]), "tags": [f.key] if f else ["question"],
-            "subject": f"Problem with {f.name}" if f else "General question",
-            "description": "Hi, this is Jane Doe (jane.doe@example.com), my export is broken...",
+            "subject": subject, "description": description,
             "requester_id": 1001, "submitter_id": 1001, "assignee_id": 2002, "collaborator_ids": [3003],
             "status": "solved", "priority": "normal",
             "custom_fields": [{"id": SANDBOX_TIME_FIELD_ID, "value": t["minutes"] * 60}]})
@@ -237,7 +261,9 @@ def jira_router(manifest_text: str) -> Router:
                            "status": {"name": "Done", "statusCategory": {"key": "done"}},
                            "created": _jira_ts(pr["opened"]), "updated": _jira_ts(pr["merged"]),
                            "resolutiondate": _jira_ts(pr["merged"]), "project": {"key": "NW"},
-                           "summary": "Customer Jane Doe reported...", "description": {"type": "doc"},
+                           "summary": w["demo_prs"].get(pr["external_id"], "Customer Jane Doe reported a problem"),
+                           "description": {"type": "doc", "content": [{"type": "paragraph", "content": [
+                               {"type": "text", "text": "Reported by Jane Doe (jane.doe@example.com)."}]}]},
                            "assignee": {"displayName": "Dev Person", "emailAddress": "dev@northwind.io"},
                            "reporter": {"displayName": "PM Person"}, "creator": {"displayName": "PM Person"},
                            "watches": {"watchCount": 3}, "comment": {"comments": [{"body": "looking"}]}}})

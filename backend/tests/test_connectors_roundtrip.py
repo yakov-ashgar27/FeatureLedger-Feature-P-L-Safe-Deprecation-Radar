@@ -63,7 +63,7 @@ def test_volumes_and_cursors(synced):
     count = lambda k, t: sum(1 for e in synced[k][0] if e.entity_type == t)  # noqa: E731
     assert count("stripe", "stripe_customer") == 520
     assert count("stripe", "stripe_invoice") == 405 * 6
-    assert count("jira", "jira_issue") == 2880
+    assert count("jira", "jira_issue") == 2880 + 30   # + Phase 3 PRs in directories no manifest owns
     assert count("posthog", "posthog_group") == 523
     assert count("zendesk", "zendesk_ticket") > 1000
     assert set(synced["stripe"][1]) == {"customers", "subscriptions", "invoices", "events"}

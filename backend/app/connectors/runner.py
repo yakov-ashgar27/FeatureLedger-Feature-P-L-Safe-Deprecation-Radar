@@ -9,7 +9,9 @@ import logging
 from typing import Any, Awaitable, Callable
 
 from ..config import config
-from ..core.manifest import parse_manifest
+from ..graph.jobs import run_graph
+from ..graph.manifest_store import active_manifest
+from ..graph.semantic_classifier import TextVault
 from .base import Batch, Envelope, NotConfigured
 from .processors import Stats, process_inbox
 from .ratelimit import BucketStore
@@ -44,7 +46,7 @@ async def commit_batch(conn, org_id: str, integration_id: str, batch: Batch) -> 
 
 
 async def run_integration(tx: Callable[..., Any], org_id: str, integ: dict[str, Any], trigger: str,
-                          store: BucketStore, manifest_text: str) -> dict[str, Any]:
+                          store: BucketStore, manifest_text: str, vault: TextVault | None = None) -> dict[str, Any]:
     iid = str(integ["id"])
     async with tx(org_id) as conn:
         run_id = await conn.fetchval("""INSERT INTO sync_runs (org_id, integration_id, trigger) VALUES ($1, $2, $3)
@@ -66,6 +68,10 @@ async def run_integration(tx: Callable[..., Any], org_id: str, integ: dict[str, 
         async for batch in built.connector.sync(built.ctx, cursors):
             async with tx(org_id) as conn:
                 res["new"] += await commit_batch(conn, org_id, iid, batch)
+            if vault is not None:   # raw text for Tier 3 stays in memory; only payloads were written above
+                for e in batch.envelopes:
+                    if e.ephemeral_text:
+                        vault.put(e.entity_type, e.external_id, e.ephemeral_text)
             res["batches"] += 1
             res["seen"] += len(batch.envelopes)
     except Exception as e:  # noqa: BLE001 - recorded on the run; committed batches stay committed
@@ -91,8 +97,8 @@ async def _finish(conn, res: dict[str, Any]) -> None:
 
 
 async def process_org(tx: Callable[..., Any], org_id: str, run_ids: list[int] | None = None) -> Stats:
-    manifest = parse_manifest(config.manifest_path.read_text())
     async with tx(org_id) as conn:
+        manifest = await active_manifest(conn)
         st = await process_inbox(conn, org_id, manifest, fx_rates())
         if run_ids:
             await conn.execute("UPDATE sync_runs SET processed = $2, dead_lettered = $3 WHERE id = ANY($1::bigint[])",
@@ -103,13 +109,20 @@ async def process_org(tx: Callable[..., Any], org_id: str, run_ids: list[int] | 
 async def sync_org(tx: Callable[..., Any], org_id: str, integrations: list[dict[str, Any]], trigger: str,
                    store: BucketStore, recompute: Callable[[str], Awaitable[Any]] | None = None) -> dict[str, Any]:
     """Sync the given integrations in dependency order, then process the inbox, then recompute the P&L."""
-    manifest_text = config.manifest_path.read_text()
+    manifest_text = config.manifest_path.read_text()   # sandbox fixtures are built from the shipped manifest
     order = {k: i for i, k in enumerate(SYNC_ORDER)}
     results = []
-    for integ in sorted(integrations, key=lambda i: order.get(i["kind"], 99)):
-        results.append(await run_integration(tx, org_id, integ, trigger, store, manifest_text))
-    st = await process_org(tx, org_id, [r["run_id"] for r in results])
+    vault = TextVault()
+    try:
+        for integ in sorted(integrations, key=lambda i: order.get(i["kind"], 99)):
+            results.append(await run_integration(tx, org_id, integ, trigger, store, manifest_text, vault))
+        st = await process_org(tx, org_id, [r["run_id"] for r in results])
+        async with tx(org_id) as conn:
+            graph = await run_graph(conn, org_id, vault)
+    finally:
+        vault.clear()
     pnl = None
-    if recompute and (st.processed or any(r["new"] for r in results)):
+    changed = graph["reallocated"] or graph["tier2"]["auto_confirmed"] or graph["tier3"]["auto_confirmed"]
+    if recompute and (st.processed or any(r["new"] for r in results) or changed):
         pnl = await recompute(org_id)
-    return {"runs": results, "processing": st.as_dict(), "pnl": pnl}
+    return {"runs": results, "processing": st.as_dict(), "graph": graph, "pnl": pnl}

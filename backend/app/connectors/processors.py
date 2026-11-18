@@ -198,7 +198,7 @@ async def _tickets(conn, org_id: str, envs: list[dict], manifest: Manifest, inde
                      "manifest" if fid else None, 1 if fid else None, t.priority, t.created_at, t.handle_minutes,
                      t.org_ref, t.estimated))
         if not fid:
-            labels[t.external_id] = f"{t.external_id} · {t.subject}"[:160]
+            labels[t.external_id] = t.external_id   # content-free label: the subject is never stored
     await conn.executemany("""
         INSERT INTO support_tickets (id, org_id, external_id, account_id, feature_id, mapping_source, mapping_confidence,
                                      priority, created_at, handle_minutes, external_org_ref, handle_time_estimated)

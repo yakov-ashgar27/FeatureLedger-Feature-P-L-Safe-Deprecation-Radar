@@ -17,6 +17,7 @@ type Integration = {
   cursors: { entity_type: string; cursor: string; updated_at: string }[];
   inbox: { pending: number; processed: number; dead_letters: number };
   recent_runs: Run[];
+  manifest?: { status: string; commit_sha: string | null; errors: string[]; received_at: string; source: string } | null;
 };
 type DeadLetter = { idempotency_key: string; entity_type: string; external_id: string; attempts: number; last_error: string };
 
@@ -33,7 +34,7 @@ const HEALTH: Record<Integration["health"], { label: string; dot: string; text: 
 };
 const SOURCE: Record<string, string> = {
   stripe: "Billing & revenue", jira: "Issue tracking", posthog: "Product analytics", zendesk: "Customer support",
-  aws_cost_explorer: "Cloud spend", github: "Code & PRs",
+  aws_cost_explorer: "Cloud spend", github: "Code, PRs & features.yaml",
 };
 const ENV_HINT: Record<string, string> = {
   stripe: "STRIPE_API_KEY", jira: "JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN",
@@ -86,7 +87,7 @@ export default function IntegrationsPage() {
     load();
   };
 
-  const list = (data?.integrations ?? []).filter((i) => i.kind !== "github");
+  const list = [...(data?.integrations ?? [])].sort((a, b) => (a.kind === "github" ? 1 : 0) - (b.kind === "github" ? 1 : 0));
   const totals = list.reduce((a, i) => ({ processed: a.processed + i.inbox.processed, pending: a.pending + i.inbox.pending,
     dead: a.dead + i.inbox.dead_letters }), { processed: 0, pending: 0, dead: 0 });
 
@@ -126,7 +127,7 @@ export default function IntegrationsPage() {
                   <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${h.text}`}>
                     <span className={`h-2 w-2 rounded-full ${h.dot}`} />{h.label}
                   </span>
-                  <button className="btn" onClick={() => trigger(i)} disabled={i.health === "syncing"}>Trigger sync</button>
+                  {i.kind !== "github" && <button className="btn" onClick={() => trigger(i)} disabled={i.health === "syncing"}>Trigger sync</button>}
                 </div>
               </div>
 
@@ -146,6 +147,16 @@ export default function IntegrationsPage() {
                 <p className="mt-3 rounded-md bg-[#fdf3ee] px-3 py-2 text-xs text-[#8a3413]">{i.last_error}</p>
               )}
 
+              {i.kind === "github" && (
+                <div className="mt-3 rounded-md bg-[#f6f5f2] px-3 py-2 text-xs text-ink-2">
+                  <b>features.yaml sync on push:</b>{" "}
+                  {i.manifest ? <>{i.manifest.status}{i.manifest.commit_sha ? ` @ ${i.manifest.commit_sha.slice(0, 8)}` : ""} ({i.manifest.source.replace("_", " ")})</> : "no push received yet"}
+                  {i.manifest?.status === "invalid" && (
+                    <ul className="mt-1 list-disc pl-4 text-[#8a3413]">{i.manifest.errors.slice(0, 5).map((e) => <li key={e}>{e}</li>)}</ul>
+                  )}
+                  <div className="mt-1 text-ink-3">Webhook: <code>/api/v1/webhooks/github/{i.id}</code> (push events)</div>
+                </div>
+              )}
               {i.cursors.length > 0 && (
                 <div className="mt-4">
                   <div className="label mb-1">Cursors</div>

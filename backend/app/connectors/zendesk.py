@@ -57,7 +57,9 @@ class ZendeskConnector(Connector):
             envs = []
             for t in r.body.get("tickets", []):
                 s = scrub_zendesk_ticket(t, metrics.get(t["id"]), self.time_field_id)
-                envs.append(ctx.envelope("zendesk_ticket", str(s["id"]), s["updated_at"] or "", s))
+                # subject + first message go to the Tier 3 classifier in memory only (never stored)
+                text = f"{t.get('subject') or ''}\n{(t.get('description') or '')[:2000]}"
+                envs.append(ctx.envelope("zendesk_ticket", str(s["id"]), s["updated_at"] or "", s, text))
             cursor = r.body.get("after_cursor")
             yield Batch("tickets", envs, cursor)
             if r.body.get("end_of_stream") or not cursor:

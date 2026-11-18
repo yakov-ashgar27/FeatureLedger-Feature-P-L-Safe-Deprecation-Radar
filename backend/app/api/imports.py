@@ -11,35 +11,42 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from ..bootstrap import apply_manifest
 from ..config import config
 from ..core.manifest import ManifestError, parse_manifest
 from ..db import org_tx
+from ..graph.manifest_store import active_manifest_text, record_and_apply
+from ..graph.reallocate import load_resolver, reallocate
 from ..importers.csv_import import ImportError_, parse_csv
 from .deps import current_org, parse_period
 
 router = APIRouter(prefix="/api/v1", tags=["import"])
 
 
-def _manifest():
+async def _manifest(org: str):
+    async with org_tx(org) as conn:
+        text = await active_manifest_text(conn)
     try:
-        return parse_manifest(config.manifest_path.read_text())
+        return parse_manifest(text)
     except ManifestError as e:
-        raise HTTPException(422, {"message": "features.yaml is invalid", "errors": e.errors}) from e
+        raise HTTPException(422, {"message": "the active features.yaml is invalid", "errors": e.errors}) from e
 
 
 @router.post("/manifest/apply")
 async def manifest_apply(org: str = Depends(current_org)):
-    """Re-read features.yaml from disk and sync teams, features and Tier 1 mappings."""
-    m = _manifest()
+    """Re-read features.yaml from disk: validate, record, apply (teams, features, Tier 1 mappings), re-allocate."""
     async with org_tx(org) as conn:
-        return await apply_manifest(conn, org, m)
+        res = await record_and_apply(conn, org, config.manifest_path.read_text(), source="disk", path="features.yaml")
+        if res.status == "invalid":
+            raise HTTPException(422, {"message": "features.yaml is invalid; the active manifest is unchanged",
+                                      "errors": res.errors})
+        moved = await reallocate(conn, org, await load_resolver(conn, parse_manifest(config.manifest_path.read_text())))
+    return {"status": res.status, **res.summary, "reallocated_prs": moved["reallocated"]}
 
 
 @router.post("/import/{kind}")
 async def import_csv(kind: Literal["accounts", "usage", "tickets", "costs"], request: Request,
                      period: str | None = None, org: str = Depends(current_org)):
-    m = _manifest()
+    m = await _manifest(org)
     text = (await request.body()).decode("utf-8-sig", errors="replace")
     try:
         parsed = parse_csv(kind, text, m)

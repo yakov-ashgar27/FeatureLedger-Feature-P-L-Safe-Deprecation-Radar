@@ -53,6 +53,7 @@ async def provision_app_role(conn: asyncpg.Connection) -> None:
         GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {APP_ROLE};
         GRANT EXECUTE ON FUNCTION resolve_org_slug(text) TO {APP_ROLE};
         GRANT EXECUTE ON FUNCTION list_sync_targets() TO {APP_ROLE};
+        GRANT EXECUTE ON FUNCTION list_orgs() TO {APP_ROLE};
         REVOKE UPDATE, DELETE ON sunset_audit_logs FROM {APP_ROLE};
         REVOKE INSERT, UPDATE, DELETE ON schema_migrations FROM {APP_ROLE};
         ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {APP_ROLE};
@@ -73,13 +74,15 @@ async def seed_if_empty(conn: asyncpg.Connection) -> str | None:
 
 async def bootstrap_real_org(conn: asyncpg.Connection) -> str:
     """Real-data mode: create the org named by DEFAULT_ORG_SLUG/ORG_NAME and apply features.yaml."""
-    from .bootstrap import apply_manifest, ensure_org
-    from .core.manifest import parse_manifest
-    manifest = parse_manifest(config.manifest_path.read_text())
+    from .bootstrap import ensure_org
+    from .graph.manifest_store import record_and_apply
     async with conn.transaction():
         org_id = await ensure_org(conn, config.default_org_slug, config.org_name)
-        stats = await apply_manifest(conn, org_id, manifest)
-    log.info("org %s (%s): applied features.yaml %s", config.default_org_slug, org_id, stats)
+        res = await record_and_apply(conn, org_id, config.manifest_path.read_text(), source="disk",
+                                     path="features.yaml")
+    if res.status == "invalid":
+        raise SystemExit(f"features.yaml is invalid: {res.errors}")
+    log.info("org %s (%s): features.yaml %s %s", config.default_org_slug, org_id, res.status, res.summary)
     return org_id
 
 

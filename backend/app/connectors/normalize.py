@@ -140,7 +140,6 @@ class TicketRow:
     handle_minutes: int
     estimated: bool
     priority: str | None
-    subject: str
 
 
 def ticket_row(t: dict[str, Any], manifest: Manifest, org_to_account: dict[str, str | None]) -> TicketRow:
@@ -149,7 +148,7 @@ def ticket_row(t: dict[str, Any], manifest: Manifest, org_to_account: dict[str, 
     return TicketRow(f"ZD-{t['id']}", org, org_to_account.get(org) if org else None,
                      feature_for_tags(t.get("tags") or [], manifest),
                      datetime.fromisoformat(t["created_at"].replace("Z", "+00:00")), minutes, est,
-                     t.get("priority"), t.get("subject") or "")
+                     t.get("priority"))
 
 
 def org_matches(orgs: list[dict], index: AccountIndex) -> dict[str, Match]:

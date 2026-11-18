@@ -128,7 +128,7 @@ def test_zendesk_ticket_scrub_and_handle_time():
            "tags": ["pdf-export"], "subject": "x" * 500, "description": "full thread", "requester_id": 1,
            "assignee_id": 2, "custom_fields": [{"id": 900, "value": "2700"}]}
     s = scrub_zendesk_ticket(raw, {"replies": 3}, 900)
-    assert "description" not in s and "requester_id" not in s and len(s["subject"]) == 120
+    assert "description" not in s and "requester_id" not in s and "subject" not in s
     assert handle_minutes(s) == (45, False)
     assert handle_minutes(scrub_zendesk_ticket(raw, {"replies": 3}, None)) == (36, True)
 

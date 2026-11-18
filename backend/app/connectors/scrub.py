@@ -3,7 +3,8 @@
 Nothing leaves a connector unless it is listed here. Dropped by construction: assignees, reporters,
 creators, watchers, requesters, submitters, collaborators, person ids, emails (only the domain is kept,
 for identity stitching), contact names, ticket descriptions and comment threads, issue summaries and
-descriptions. A new field added by a vendor is dropped until someone adds it here on purpose.
+descriptions, ticket subjects and PR titles. (Phase 3: the classifier receives that text in memory only,
+through a TextVault, and stores nothing but the embedding.) A new field added by a vendor is dropped until someone adds it here on purpose.
 """
 from __future__ import annotations
 
@@ -117,7 +118,6 @@ def scrub_zendesk_ticket(t: dict[str, Any], metric_set: dict[str, Any] | None,
         "updated_at": t.get("updated_at"),
         "organization_id": t.get("organization_id"),
         "tags": sorted(set(t.get("tags") or [])),
-        "subject": (t.get("subject") or "")[:SUBJECT_MAX],   # triage label only; description/thread dropped
         "status": t.get("status"),
         "priority": t.get("priority"),
         "time_spent_seconds": time_spent,

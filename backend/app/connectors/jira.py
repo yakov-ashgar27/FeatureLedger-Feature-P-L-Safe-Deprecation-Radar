@@ -17,7 +17,7 @@ from .base import Batch, Connector, SyncCtx
 from .scrub import scrub_jira_issue
 
 FIELDS = ["issuetype", "priority", "labels", "status", "created", "updated", "resolutiondate", "parent",
-          "project", "components"]
+          "project", "components", "summary", "description"]   # summary/description: Tier 3, memory only
 PAGE = 100
 TYPE_TO_KIND = {"bug": "bug", "incident": "incident", "story": "feature", "task": "chore", "sub-task": "chore",
                 "subtask": "chore", "epic": "feature", "improvement": "feature", "spike": "chore"}
@@ -31,6 +31,27 @@ def kind_of(issue: dict[str, Any]) -> str:
 
 def priority_of(issue: dict[str, Any]) -> str | None:
     return PRIORITY_TO_P.get((issue.get("priority") or "").lower())
+
+
+def adf_text(node: Any, limit: int = 2000) -> str:
+    """Plain text of an Atlassian Document Format body (Jira v3 descriptions)."""
+    out: list[str] = []
+
+    def walk(n: Any) -> None:
+        if sum(len(x) for x in out) > limit:
+            return
+        if isinstance(n, dict):
+            if n.get("type") == "text" and isinstance(n.get("text"), str):
+                out.append(n["text"])
+            for c in n.get("content") or []:
+                walk(c)
+        elif isinstance(n, list):
+            for c in n:
+                walk(c)
+        elif isinstance(n, str):
+            out.append(n)
+    walk(node)
+    return " ".join(out)[:limit]
 
 
 def jql_time(dt: datetime) -> str:
@@ -69,7 +90,9 @@ class JiraConnector(Connector):
             envs = []
             for raw in r.body.get("issues", []):
                 s = scrub_jira_issue(raw)
-                envs.append(ctx.envelope("jira_issue", s["key"], s["updated"] or "", s))
+                f = raw.get("fields") or {}
+                text = f"{f.get('summary') or ''}\n{adf_text(f.get('description'))}"
+                envs.append(ctx.envelope("jira_issue", s["key"], s["updated"] or "", s, text))
                 if s["updated"]:
                     newest = max(newest, parse_jira_ts(s["updated"]))
             token = r.body.get("nextPageToken")

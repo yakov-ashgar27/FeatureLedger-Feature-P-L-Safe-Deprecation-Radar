@@ -87,6 +87,57 @@ jobs:
             sleep 4
           done
           docker compose logs worker | tail -50; exit 1
+      - name: "Phase 3: Tier 2 + Tier 3 ran, pgvector holds embeddings, no raw text or PII stored"
+        run: |
+          curl -fs "http://localhost:8000/api/v1/triage?status=auto" | python3 -c "
+          import json, sys
+          d = json.load(sys.stdin)
+          tiers = {i['tier'] for i in d['items']}
+          print('auto-confirmed:', len(d['items']), 'tiers', tiers, 'counts', d['counts'])
+          assert {2, 3} <= tiers, 'expected auto-confirmed mappings from both tiers'
+          assert all(i['confidence'] >= 0.80 for i in d['items'])
+          "
+          curl -fs "http://localhost:8000/api/v1/triage?status=pending" | python3 -c "
+          import json, sys
+          d = json.load(sys.stdin)
+          assert d['items'] and all(i['confidence'] < 0.80 for i in d['items']), 'pending items must be below 0.80'
+          print('pending:', len(d['items']))
+          "
+          q() { docker compose exec -T db psql -U postgres -d featureledger -tAc "$1"; }
+          echo "subject embeddings: $(q 'select count(*) from subject_embeddings')"
+          test "$(q 'select count(*) > 0 from subject_embeddings')" = "t"
+          test "$(q 'select count(*) > 0 from feature_embeddings')" = "t"
+          test "$(q "select count(*) from mapping_suggestions where rationale ilike '%jane%' or subject_label ilike '%jane%' or rationale like '%@%'")" = "0"
+          test "$(q "select count(*) from ingest_inbox where payload::text ilike '%jane%' or payload::text ilike '%stopped working%' or payload::text ilike '%keeps failing%'")" = "0"
+      - name: "Phase 3: features.yaml push webhook (invalid is rejected and reported, valid is applied)"
+        run: |
+          GH=$(curl -fs http://localhost:8000/api/v1/integrations | python3 -c "import json,sys; print([i['id'] for i in json.load(sys.stdin)['integrations'] if i['kind']=='github'][0])")
+          mk() { python3 -c "
+          import json, sys
+          text = open('features.yaml').read() if sys.argv[1] == 'good' else 'version: 1\nfeatures: [{key: Bad_Key, name: X}]'
+          text = text.replace('name: Legacy PDF Exporter', 'name: Legacy PDF Exporter (deprecated)')
+          print(json.dumps({'ref': 'refs/heads/main', 'after': sys.argv[2], 'repository': {'full_name': 'northwind/app', 'default_branch': 'main'},
+                            'commits': [{'added': [], 'modified': ['features.yaml'], 'removed': []}],
+                            'featureledger_sandbox_files': {'features.yaml': text}}))" "$1" "$2"; }
+          hook() { curl -fs -X POST "http://localhost:8000/api/v1/webhooks/github/$GH" -H "X-FeatureLedger-Secret: sandbox" -H "X-GitHub-Event: push" -H "Content-Type: application/json" -d "$1"; }
+          hook "$(mk bad c0ffee01)" | tee /tmp/bad.json
+          python3 -c "import json; r=json.load(open('/tmp/bad.json'))['results'][0]; assert r['status']=='invalid' and r['errors'], r"
+          curl -fs http://localhost:8000/api/v1/integrations | python3 -c "
+          import json, sys
+          gh = [i for i in json.load(sys.stdin)['integrations'] if i['kind'] == 'github'][0]
+          print(gh['health'], gh['last_error'], gh['manifest']['status'])
+          assert gh['health'] == 'failing' and gh['manifest']['status'] == 'invalid' and gh['last_error']
+          "
+          curl -fs http://localhost:8000/api/v1/features/legacy-pdf-export | python3 -c "import json,sys; assert json.load(sys.stdin)['feature']['name'] == 'Legacy PDF Exporter'"
+          hook "$(mk good c0ffee02)" | tee /tmp/good.json
+          python3 -c "import json; r=json.load(open('/tmp/good.json'))['results'][0]; assert r['status']=='applied', r"
+          curl -fs http://localhost:8000/api/v1/features/legacy-pdf-export | python3 -c "import json,sys; n=json.load(sys.stdin)['feature']['name']; print(n); assert n == 'Legacy PDF Exporter (deprecated)'"
+      - name: "Phase 3: a human decision is applied and the graph re-runs cleanly"
+        run: |
+          ID=$(curl -fs "http://localhost:8000/api/v1/triage?status=pending&tier=2" | python3 -c "import json,sys; print(json.load(sys.stdin)['items'][0]['id'])")
+          curl -fs -X POST "http://localhost:8000/api/v1/triage/$ID" -H "Content-Type: application/json" -d '{"decision":"confirm"}'
+          curl -fs -X POST "http://localhost:8000/api/v1/graph/run" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['tier2'], d['protected_human']); assert d['pnl']['features'] > 0"
+          curl -fs "http://localhost:8000/api/v1/triage?status=decided" | python3 -c "import json,sys; assert len(json.load(sys.stdin)['items']) == 1"
       - name: dashboard pages render through the proxy
         run: |
           for p in / /features/legacy-pdf-export /simulator /sunset /mappings /integrations; do

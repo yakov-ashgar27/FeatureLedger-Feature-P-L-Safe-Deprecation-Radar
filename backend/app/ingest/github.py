@@ -91,7 +91,7 @@ def normalize_pr(repo: str, pr: dict[str, Any], files: list[dict[str, Any]], rev
     p = scrub_pr(pr)
     fs = scrub_files(files)
     rv = scrub_reviews(reviews)
-    kind, prio = classify_kind(p["labels"], p.get("title", ""))
+    kind, prio = classify_kind(p["labels"], pr.get("title") or "")   # raw title: read, never stored
     path_stats = [{"path": f["filename"], "additions": int(f.get("additions", 0)),
                    "deletions": int(f.get("deletions", 0))} for f in fs]
     counted = [s for s in path_stats if not manifest.is_ignored(s["path"])]
@@ -105,7 +105,7 @@ def normalize_pr(repo: str, pr: dict[str, Any], files: list[dict[str, Any]], rev
         owner_team = manifest.by_key()[top].owner_team
     return NormalizedPR(
         external_id=f"{repo}#{p['number']}",
-        title_for_triage=f"{repo}#{p['number']} · {p.get('title', '')[:120]}",
+        title_for_triage=f"{repo}#{p['number']}",   # content-free: the title reaches Tier 3 in memory only
         kind=kind, priority=prio, opened_at=p["created_at"], merged_at=p.get("merged_at"),
         additions=adds, deletions=dels, files_changed=len(counted),
         review_rounds=rv["changes_requested"], is_revert=kind is WorkKind.REVERT, is_sweeping=sweeping,
@@ -179,7 +179,9 @@ class GitHubClient:
 
 # ------------------------------------------------------------------ persistence
 async def sync_repository(conn, org_id: str, integration_id: str, repo: str, client: GitHubClient,
-                          manifest: Manifest, default_team_key: str | None = None) -> dict[str, int]:
+                          manifest: Manifest, default_team_key: str | None = None, vault=None) -> dict[str, int]:
+    """`vault` (optional TextVault) receives PR titles/bodies of PRs no manifest path owns, for Tier 3.
+    The text is held in memory only; it is never part of the stored envelope."""
     """Run inside an org-scoped transaction (app.db.org_tx). Returns counters."""
     entity = f"pull_request:{repo}"
     cursor = await conn.fetchval(
@@ -200,6 +202,8 @@ async def sync_repository(conn, org_id: str, integration_id: str, repo: str, cli
         files = await client.pr_files(repo, pr["number"])
         reviews = await client.pr_reviews(repo, pr["number"])
         n = normalize_pr(repo, pr, files, reviews, manifest)
+        if vault is not None and not n.allocations and not n.is_sweeping:
+            vault.put("github_pr", n.external_id, f"{pr.get('title') or ''}\n{(pr.get('body') or '')[:1000]}")
         key = idempotency_key(integration_id, "pull_request", n.external_id, pr["updated_at"])
         inserted = await conn.fetchval(
             """INSERT INTO ingest_inbox (idempotency_key, org_id, integration_id, entity_type, external_id, payload,

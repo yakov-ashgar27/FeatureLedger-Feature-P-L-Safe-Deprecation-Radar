@@ -18,6 +18,7 @@ from .config import config
 from .connectors.ratelimit import RedisBucketStore
 from .connectors.runner import process_org, sync_org
 from .db import close_pool, init_pool, org_tx
+from .graph.jobs import run_graph
 from .jobs.compute_pnl import recompute
 
 log = logging.getLogger("featureledger.worker")
@@ -58,6 +59,24 @@ async def process_job(ctx: dict, org_id: str):
     return st.as_dict()
 
 
+async def graph_job(ctx: dict, org_id: str, reason: str = "manual"):
+    """Re-run the Feature Graph (reallocation + Tier 2; Tier 3 needs a sync's text) and the P&L."""
+    async with org_tx(org_id) as conn:
+        out = await run_graph(conn, org_id)
+    await _recompute(org_id)
+    log.info("graph %s (%s): %s", org_id, reason, out)
+    return out
+
+
+async def hourly_graph(ctx: dict) -> dict:
+    pool = await init_pool()
+    async with pool.acquire() as conn:
+        orgs = [str(r["org_id"]) for r in await conn.fetch("SELECT org_id FROM list_orgs()")]
+    for org in orgs:
+        await ctx["redis"].enqueue_job("graph_job", org, "hourly", _job_id=f"graph:{org}")
+    return {"orgs": len(orgs)}
+
+
 async def schedule_due_syncs(ctx: dict) -> dict:
     due: dict[str, list[str]] = {}
     for t in await _targets():
@@ -80,8 +99,10 @@ async def shutdown(ctx: dict) -> None:
 class WorkerSettings:
     redis_settings = RedisSettings.from_dsn(config.redis_url)
     functions = [func(sync_org_job, keep_result=0, timeout=1800, max_tries=1),
-                 func(process_job, keep_result=0, timeout=900, max_tries=1)]
-    cron_jobs = [cron(schedule_due_syncs, minute={0, 15, 30, 45}, run_at_startup=True)]
+                 func(process_job, keep_result=0, timeout=900, max_tries=1),
+                 func(graph_job, keep_result=0, timeout=900, max_tries=1)]
+    cron_jobs = [cron(schedule_due_syncs, minute={0, 15, 30, 45}, run_at_startup=True),
+                 cron(hourly_graph, minute=7)]
     on_startup = startup
     on_shutdown = shutdown
     max_jobs = 4

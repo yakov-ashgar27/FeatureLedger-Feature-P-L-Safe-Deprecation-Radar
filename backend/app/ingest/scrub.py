@@ -10,7 +10,7 @@ from typing import Any
 
 ISSUE_KEY_RE = re.compile(r"\b([A-Z][A-Z0-9]{1,9}-\d{1,6})\b")
 
-PR_ALLOWED = {"number", "title", "state", "created_at", "updated_at", "merged_at", "closed_at",
+PR_ALLOWED = {"number", "state", "created_at", "updated_at", "merged_at", "closed_at",
               "additions", "deletions", "changed_files", "draft"}
 FILE_ALLOWED = {"filename", "additions", "deletions", "status", "previous_filename"}
 

@@ -58,6 +58,9 @@ class Envelope:
     external_version: str     # updated_at / event id / content hash: drives idempotency
     payload: dict[str, Any]   # ALREADY scrubbed (allowlist) by the connector
     observed_at: datetime
+    # Raw text for the Tier 3 classifier. NEVER persisted: the runner moves it into an in-memory
+    # TextVault and only `payload` is written to ingest_inbox. Excluded from equality and repr.
+    ephemeral_text: str | None = field(default=None, compare=False, repr=False)
 
     @property
     def idempotency_key(self) -> str:
@@ -82,8 +85,9 @@ class SyncCtx:
     def now(self) -> datetime:
         return self.clock()
 
-    def envelope(self, entity_type: str, external_id: str, version: str, payload: dict[str, Any]) -> Envelope:
-        return Envelope(self.integration_id, entity_type, str(external_id), str(version), payload, self.now())
+    def envelope(self, entity_type: str, external_id: str, version: str, payload: dict[str, Any],
+                 text: str | None = None) -> Envelope:
+        return Envelope(self.integration_id, entity_type, str(external_id), str(version), payload, self.now(), text)
 
 
 def month_start(d: date | datetime) -> date:

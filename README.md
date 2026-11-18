@@ -37,6 +37,13 @@ open http://localhost:8000/docs  # API (OpenAPI)
 - **Live:** set `SANDBOX_MODE=false` and fill in the credentials for any source in `.env`. Each one is listed there with the exact read-only scopes it needs. Then restart. Sources you don't configure show as *Not configured*.
 - **Guarantees:** allowlist scrubbing (no assignees, reporters, emails, names or ticket threads); idempotent inbox with the cursor committed alongside each batch; identity stitching (Stripe id, PostHog group, Zendesk org, email domain, with unmatched usage booked to `__unresolved__`); Redis token buckets; backoff with jitter; dead letters after 5 attempts; P&L recomputed after every sync that brings something new.
 
+## Phase 3: intelligent Feature Graph
+
+- **features.yaml syncs on push.** A GitHub webhook validates and applies the manifest. An invalid push is rejected with an exact error list on the GitHub integration's health, and the previous manifest stays active.
+- **Tier 2, structural:** import edges, co-change and naming similarity map code nobody declared. *"Imports 2 modules from legacy-pdf-export; changed together in 11 of 12 PRs"*.
+- **Tier 3, semantic:** tickets, Jira issues and PR titles are matched to feature centroids. Embeddings live in pgvector; raw text is held in memory only and discarded right after embedding. It works without any LLM key (a deterministic local embedder) or with an OpenAI-compatible API.
+- **Precedence:** your decision > features.yaml > auto-confirmed (≥ 80%) > triage. Nothing below 80% is guessed; it stays *unmapped* until confirmed on the **Feature Graph** screen (Confirm, Reassign, Reject, or Undo for automatic ones).
+
 ## What you'll see on the seed data
 
 | Feature | Class | Why |
@@ -48,8 +55,8 @@ open http://localhost:8000/docs  # API (OpenAPI)
 | AI Summaries | **Growth Bet** | Launched 2026-04, adoption +48%/mo, LLM-heavy |
 | Document Editor, Real-time Collab, … | **Cash Cow** | High value at a manageable cost |
 
-The What-if Simulator pre-selects the three zombies. It shows roughly **4.6 FTE** (515 engineering hours a month)
-and **~$630k/yr** of avoidable cost, against ~$115k of expected ARR loss across 31 accounts. Two sunset plans are already in
+The What-if Simulator pre-selects the three zombies. It shows roughly **4.5 FTE** (about 510 engineering hours a month)
+and **over $600k/yr** of avoidable cost, against ~$115k of expected ARR loss across 31 accounts. Two sunset plans are already in
 flight. Zapier v1 is in its scream test; try **Roll back**, or start a new plan from the
 Legacy PDF tear-sheet.
 
@@ -60,11 +67,12 @@ db/migrations/        PostgreSQL DDL: partitions, RLS, hash-chained audit log, o
 backend/app/core/     pure P&L engine: effort, attribution, pnl, manifest, sunset, simulate
 backend/app/ingest/   GitHub ingester + allowlist scrubber (no author identity, no source code)
 backend/app/connectors/  Phase 2: Stripe, Jira, PostHog, Zendesk, AWS CE + sandbox APIs, runner, processors
-backend/app/worker.py ARQ worker: 15-minute schedule, manual and webhook triggers
+backend/app/graph/     Phase 3: precedence, Tier 2 structural, Tier 3 semantic (pgvector), manifest push sync
+backend/app/worker.py ARQ worker: 15-minute schedule, hourly graph, manual and webhook triggers
 backend/app/jobs/     P&L job: DB → engine → ledger tables
 backend/app/api/      FastAPI routes
 backend/app/seed/     deterministic Northwind Cloud generator
-backend/tests/        69 tests: formulas, guards, scrubber, seed end-to-end invariants
+backend/tests/        85 tests: formulas, guards, scrubber, seed end-to-end invariants
 web/                  Next.js 15 dashboard: ledger + quadrant, tear-sheet, simulator, sunset board, triage, sync health
 features.yaml         Tier 1 Feature Graph manifest (teams + features) for the seed company
 templates/            CSV templates: accounts, usage, tickets, costs

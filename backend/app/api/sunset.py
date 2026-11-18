@@ -7,8 +7,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from ..config import config
-from ..core.manifest import parse_manifest
+from ..graph.manifest_store import active_manifest
 from ..core.sunset import PlanView, SunsetState, TransitionError, TransitionResult, advance, cancel, rollback
 from ..core.sunset_artifacts import DossierAccount, blast_radius, cleanup_pr_outline, impact_dossier
 from ..db import org_tx
@@ -128,8 +127,8 @@ async def get_plan(plan_id: str, org: str = Depends(current_org)):
 @router.post("/{plan_id}/evidence/{kind}")
 async def generate_evidence(plan_id: str, kind: Literal["blast_radius", "impact_dossier", "cleanup_pr"],
                             org: str = Depends(current_org)):
-    manifest = parse_manifest(config.manifest_path.read_text())
     async with org_tx(org) as conn:
+        manifest = await active_manifest(conn)
         p = await _load(conn, plan_id, for_update=True)
         spec = manifest.by_key().get(p["feature_key"])
         if spec is None:

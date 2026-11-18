@@ -65,6 +65,8 @@ async def integrations(org: str = Depends(current_org)):
                    count(*) FILTER (WHERE processed_at IS NOT NULL) AS processed,
                    count(*) FILTER (WHERE dead_lettered_at IS NOT NULL) AS dead_letters
               FROM ingest_inbox GROUP BY integration_id""")
+        manifest = await conn.fetchrow("""SELECT status, commit_sha, errors, received_at, source FROM manifest_versions
+                                            ORDER BY received_at DESC, id DESC LIMIT 1""")
         runs = await conn.fetch("""
             SELECT * FROM (SELECT r.*, row_number() OVER (PARTITION BY integration_id ORDER BY started_at DESC) rn
                              FROM sync_runs r) x WHERE rn <= 8 ORDER BY started_at DESC""")
@@ -86,6 +88,10 @@ async def integrations(org: str = Depends(current_org)):
         d["inbox"] = by_i.get(iid, {"pending": 0, "processed": 0, "dead_letters": 0})
         d["recent_runs"] = [row({k: v for k, v in r.items() if k not in ("rn", "org_id", "integration_id")})
                             for r in recent]
+        if i["kind"] == "github":
+            d["manifest"] = row(manifest) if manifest else None
+            if manifest and manifest["status"] == "invalid":
+                d["health"] = "failing"
         out.append(d)
     return {"integrations": out, "sandbox_mode": config.sandbox_mode}
 
@@ -151,11 +157,48 @@ def _verify(kind: str, sandbox: bool, request: Request, body: bytes) -> None:
         wh.verify_shared_secret(secret, h.get("x-featureledger-secret"))
 
 
+async def _github_webhook(i: dict[str, Any], request: Request, body: bytes, org: str) -> dict[str, Any]:
+    """GitHub push -> features.yaml validate + apply (Phase 3). Other events are acknowledged and ignored."""
+    import json
+
+    from ..graph.manifest_sync import default_fetcher, handle_push
+    h = request.headers
+    secret = os.environ.get("GITHUB_WEBHOOK_SECRET", "")
+    try:
+        if secret:
+            wh.verify_hub_signature(secret, h.get("x-hub-signature-256"), body)
+        elif config.sandbox_mode:
+            wh.verify_shared_secret("sandbox", h.get("x-featureledger-secret"))
+        else:
+            raise HTTPException(412, "set GITHUB_WEBHOOK_SECRET to accept GitHub webhooks")
+    except wh.BadSignature as e:
+        raise HTTPException(401, f"webhook rejected: {e}") from e
+    event = h.get("x-github-event", "push")
+    if event == "ping":
+        return {"event": "ping", "ok": True}
+    if event != "push":
+        return {"event": event, "ignored": True}
+    payload = json.loads(body or b"{}")
+    try:
+        fetcher = default_fetcher(payload, sandbox=bool(i["sandbox"]) or (config.sandbox_mode and not secret))
+    except RuntimeError as e:
+        raise HTTPException(412, str(e)) from e
+    async with org_tx(org) as conn:
+        res = await handle_push(conn, org, payload, fetcher)
+    if res.applied:
+        q = await _queue()
+        await q.enqueue_job("graph_job", org, "manifest_push", _job_id=f"graph:{org}")
+    return {"event": "push", "relevant": res.plan.relevant, "reason": res.plan.reason, "commit": res.plan.sha,
+            "results": res.results}
+
+
 @router.post("/webhooks/{kind}/{integration_id}", status_code=202)
 async def webhook(kind: str, integration_id: str, request: Request, org: str = Depends(current_org)):
     body = await request.body()
     async with org_tx(org) as conn:
         i = await _integration(conn, integration_id)
+    if kind == "github" and i["kind"] == "github":
+        return await _github_webhook(i, request, body, org)
     if i["kind"] != kind or kind == "aws_cost_explorer":
         raise HTTPException(404, "no webhook for this integration")
     try:

@@ -1,4 +1,4 @@
-# FeatureLedger: specification (as built, Phases 1–2)
+# FeatureLedger: specification (as built, Phases 1–3)
 
 This document describes what the code in this repository does, and why. Every formula below has
 a unit test in `backend/tests/`, and the section numbers are referenced from code comments.
@@ -266,11 +266,48 @@ Stripe accounts and PostHog/AWS months are rebuilt from the latest version of ev
 - `POST /api/v1/integrations/{id}/sync` triggers a sync.
 - `GET /api/v1/integrations/{id}/dead-letters` lists dead letters, and `POST /api/v1/integrations/{id}/dead-letters/retry` re-queues them.
 
-## 11. Not built yet (Phases 3–4)
+## 11. Phase 3: intelligent Feature Graph
+
+**Precedence** (`graph/precedence.py`), from highest to lowest:
+1. A **human** decision.
+2. **features.yaml** (Tier 1).
+3. **Auto-confirmed machine evidence**, at confidence ≥ 0.80.
+4. **The triage queue.** Below 0.80 nothing is guessed: the churn or ticket stays booked as *unmapped* until a person decides.
+
+The threshold is compared at the stored precision of two decimals, so the confidence triage shows is exactly the one that was compared. `EffectiveResolver` applies this order per file. `reallocate` rewrites a PR's effort split whenever the graph changes. It never touches a PR that a person decided in triage, directly or through its linked Jira issue.
+
+**Tier 2: structural inference** (`graph/structural_inference.py`). Unmapped files are clustered by directory, with generic leaf folders (`handlers/`, `lib/`, `tests/`) folded into their parent. Each cluster is scored against every feature on three signals:
+- **Imports:** import-graph edges to the feature, by share and count.
+- **Co-change:** PRs that touch the cluster and the feature together.
+- **Naming:** path tokens the cluster shares with the feature.
+
+The scores combine as `1 − Π(1 − w·s)`. A close runner-up costs confidence quadratically, and the result is capped at 0.97. The rationale is generated from the evidence, for example *"Imports 2 modules from legacy-pdf-export; changed together with legacy-pdf-export in 11 of 12 PRs; path shares 'export, legacy, pdf'"*. On the seed company, `export-pdf-legacy-print/` auto-maps at 0.83. `notifications/digest/` (0.65), `zapier_v1_compat/` (0.67) and `scripts/maintenance/` (0.28) go to triage.
+
+**Tier 3: semantic classifier** (`graph/semantic_classifier.py`, pgvector `feature_embeddings` and `subject_embeddings` with HNSW cosine indexes). Inputs are unmapped Zendesk tickets (subject and first message), Jira issues linked to unmapped PRs (summary and description), and unmapped PR titles.
+- **Privacy (D5):** connectors put this text only into an in-memory `TextVault`. It is never in an envelope payload, the inbox or a log. `classify()` wipes every item's text in a `finally` block before any SQL runs. What is stored: the vector, the confidence, a non-quoting rationale (emails and phone numbers redacted), and a content-free label such as `ZD-70012` or `NW-10123`. Ticket subjects and PR titles are no longer stored anywhere.
+- **Centroids:** each feature's manifest descriptor, blended 50/50 with the mean embedding of tickets a person confirmed for it. Machine-confirmed subjects never feed a centroid.
+- **Confidence:** a calibrated similarity to the best centroid, combined with the margin over the runner-up.
+- **Embedders:** without `LLM_API_KEY`, a deterministic 1536-dimension hashing embedder and template rationales are used, so CI and local runs need no external service. With a key, any OpenAI-compatible `/embeddings` endpoint is used, and `/chat/completions` writes the rationale (15 words, no names, no quotes).
+- **Results on the sandbox:** of 149 untagged tickets, the 76 clear ones auto-confirm to the correct feature (lowest confidence 0.88). The 73 vague ones all go to triage (highest 0.36).
+
+**Manifest sync on push** (`graph/manifest_sync.py`, `graph/manifest_store.py`). A GitHub `push` to the default branch that adds or modifies `features.yaml` or `.featureledger/features.yaml` triggers this sequence:
+1. The webhook signature is verified with `X-Hub-Signature-256`.
+2. The file is fetched at the pushed commit through the Contents API.
+3. The manifest is validated.
+4. A valid manifest is recorded and applied: teams, features and Tier 1 mappings. Then the graph job re-allocates effort and re-runs Tier 2, and the P&L is recomputed.
+
+An invalid manifest is recorded in `manifest_versions` with its structured error list. It shows on the GitHub integration's health (*failing*, with `last_error`) and in the triage UI; the previous manifest and every mapping stay active. An identical manifest is recorded as *unchanged*. A removed manifest changes nothing, because deleting ownership must be deliberate. The active manifest is the latest applied version, falling back to `features.yaml` on disk.
+
+**Triage** (`/mappings` and `/api/v1/triage`):
+- **Views:** *Needs review* (below 0.80), *Auto-confirmed* (0.80 and above; can be undone) and *Decided*. Each item shows its tier, rationale, evidence and a confidence bar with the 0.80 mark.
+- **Actions:** Confirm, Reassign and Reject write `human` mappings. A rejection is never re-proposed.
+- **Buttons:** *Run inference* and *Recompute P&L*.
+
+**When the graph runs:** after every sync (with that job's TextVault), after a manifest push, hourly, and on demand through `POST /api/v1/graph/run`.
+
+## 12. Not built yet (Phase 4)
 
 - Linear, Mixpanel/Amplitude, HubSpot/Salesforce, Intercom and GCP connectors (same contract as the Phase 2 five).
-- Tier 2 import-graph clustering and Tier 3 embedding jobs (the tables and triage loop exist).
-- Pulling `features.yaml` from the repo on push.
 - LaunchDarkly/Statsig flag toggling and evaluation counts.
 - Opening the cleanup PR through the GitHub API (outline only today).
 - OIDC/SSO, per-user roles, and KMS-backed token encryption (the columns exist; Phase 2 reads credentials from the environment).

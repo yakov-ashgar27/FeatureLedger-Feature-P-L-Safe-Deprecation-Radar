@@ -110,6 +110,22 @@ def _path_under(glob: str, rng: random.Random, n: int) -> str:
     return f"{base}/{sub}{name}"
 
 
+DEMO_UNMAPPED = [
+    {"dir": "web/src/features/export-pdf-legacy-print", "feature": "legacy-pdf-export", "files": 5, "edges_per_file": 2,
+     "prs_per_month": 2, "cochange": 0.8, "bug_share": 0.6,
+     "summaries": ["Legacy PDF export print layout cuts off tables", "Print preview for exported PDF shows blank pages",
+                   "Fix margins when printing legacy PDF exports"]},
+    {"dir": "services/notifications/digest", "feature": "comments-mentions", "files": 4, "edges_per_file": 1,
+     "prs_per_month": 2, "cochange": 0.5, "bug_share": 0.3,
+     "summaries": ["Daily digest misses comments where a user was mentioned", "Group comment mentions in the digest",
+                   "Digest email shows duplicate mention notifications"]},
+    {"dir": "services/integrations/zapier_v1_compat", "feature": "zapier-v1-webhooks", "files": 3, "edges_per_file": 1,
+     "prs_per_month": 1, "cochange": 0.35, "bug_share": 0.6,
+     "summaries": ["Zapier v1 webhook payload compatibility shim drops fields",
+                   "Retry Zapier hook fired events after timeout"]},
+]
+
+
 @dataclass
 class Seed:
     org_id: str
@@ -337,12 +353,53 @@ def build(manifest_text: str, rng_seed: int = 42) -> Seed:
                 cost_lines.append(CostLine(f.id, m, "llm", round(p.llm * (1 + p.trend) ** mi * rng.uniform(0.95, 1.05), 2)))
         cost_lines.append(CostLine(None, m, "infra", round(3_000 * rng.uniform(0.9, 1.1), 2)))
 
+    # ------------------------------------------------------------------ Phase 3: code no manifest owns
+    # Three directories nobody declared in features.yaml. Tier 2 must work out who owns them from import
+    # edges, co-change and naming; their own RNG keeps the rest of the company byte-for-byte unchanged.
+    rng2 = random.Random(7)
+    demo_edges: list[tuple[str, str]] = []
+    demo_prs: dict[str, str] = {}
+    for d in DEMO_UNMAPPED:
+        target = specs[d["feature"]]
+        team = team_by_key[target.owner_team]
+        own_files = [_path_under(d["dir"] + "/**", rng2, k) for k in range(d["files"])]
+        target_files = [_path_under(target.paths[0], rng2, 100 + k) for k in range(4)]
+        for i, f_ in enumerate(own_files):
+            for t in target_files[: d["edges_per_file"]]:
+                demo_edges.append((f_, t))
+        for m in MONTHS:
+            for _ in range(d["prs_per_month"]):
+                n += 1
+                files = [{"path": rng2.choice(own_files), "additions": rng2.randint(20, 160),
+                          "deletions": rng2.randint(0, 40)} for _ in range(rng2.randint(1, 3))]
+                if rng2.random() < d["cochange"]:
+                    files.append({"path": rng2.choice(target_files), "additions": rng2.randint(5, 40),
+                                  "deletions": rng2.randint(0, 10)})
+                kind = WorkKind.BUG if rng2.random() < d["bug_share"] else WorkKind.FEATURE
+                shares, _ = manifest.allocate_paths(files)
+                adds = sum(x["additions"] for x in files)
+                dels = sum(x["deletions"] for x in files)
+                review = rng2.randint(0, 2)
+                merged = datetime(m.year, m.month, rng2.randint(1, 27), rng2.randint(8, 19), tzinfo=timezone.utc)
+                wid = uid("wi", n)
+                ext = f"northwind/app#{10000 + n}"
+                work_items.append(WorkItem(wid, team.id, m, kind, None, adds, dels, len(files), review,
+                                           allocations={fid[k]: v for k, v in shares.items()}))
+                wi_rows.append({"id": wid, "external_id": ext, "team_id": team.id, "kind": kind.value, "priority": None,
+                                "opened": merged - timedelta(hours=rng2.randint(4, 96)), "merged": merged,
+                                "additions": adds, "deletions": dels, "files": len(files), "review": review,
+                                "incident_h": 0.0, "paths": files, "shares": shares,
+                                "raw": raw_effort_hours(adds, dels, len(files), review, kind, None, 0.0)})
+                demo_prs[ext] = rng2.choice(d["summaries"])
+
     snapshots = {m: accounts for m in MONTHS}
     ds = Dataset(settings, teams, features, work_items, snapshots, usage, act, tickets, cost_lines)
     args = (org_id, manifest, teams, features, accounts, csm, usage, act, wi_rows, ticket_rows, suggestions,
-            cost_lines, fid)
+            cost_lines, fid, demo_edges)
+    hints = {x["subject"]: (x["feature"], x["conf"]) for x in suggestions}
     return Seed(org_id, ds, manifest, _to_sql(*args), _to_sql(*args, connector_data=False),
-                {"accounts": accounts, "csm": csm, "ticket_rows": ticket_rows, "wi_rows": wi_rows})
+                {"accounts": accounts, "csm": csm, "ticket_rows": ticket_rows, "wi_rows": wi_rows,
+                 "ticket_hints": hints, "demo_prs": demo_prs, "demo_edges": sorted(set(demo_edges))})
 
 
 # ---------------------------------------------------------------------- SQL rendering
@@ -369,7 +426,7 @@ def _insert(table: str, cols: list[str], rows: list[list[object]], chunk: int = 
 
 
 def _to_sql(org_id, manifest, teams, features, accounts, csm, usage, act, wi_rows, ticket_rows, suggestions,
-            cost_lines, fid, connector_data: bool = True) -> str:
+            cost_lines, fid, demo_edges=(), connector_data: bool = True) -> str:
     """connector_data=False (SANDBOX_MODE): customers, usage, tickets and costs are NOT inserted here;
     the Phase 2 connectors fetch them from the sandbox APIs, exactly as they would from live ones."""
     s: list[str] = ["-- generated by app.seed.generate; deterministic (seed=42)", "BEGIN;",
@@ -413,16 +470,6 @@ def _to_sql(org_id, manifest, teams, features, accounts, csm, usage, act, wi_row
                 maps.append([aid, fid[spec.key], org_id, "manifest", 1.0, "confirmed"])
     s += _insert("code_assets", ["id", "org_id", "repo_id", "asset_type", "identifier"], assets)
     s += _insert("asset_feature_mappings", ["asset_id", "feature_id", "org_id", "source", "confidence", "status"], maps)
-    # a few heuristic (Tier 2) mappings awaiting confirmation
-    for path, key, conf in [("web/src/features/export-pdf-legacy-print/**", "legacy-pdf-export", 0.72),
-                            ("services/notifications/digest/**", "comments-mentions", 0.64)]:
-        aid = uid("asset", "path_glob", path)
-        s += _insert("code_assets", ["id", "org_id", "repo_id", "asset_type", "identifier"],
-                     [[aid, org_id, repo, "path_glob", path]])
-        s += _insert("mapping_suggestions", ["org_id", "subject_type", "subject_id", "subject_label",
-                                             "suggested_feature_id", "confidence", "source", "rationale"],
-                     [[org_id, "code_asset", aid, path, fid[key], conf, "heuristic",
-                       "Directory name and import graph cluster with the suggested feature"]])
     s += _insert("import_edges", ["org_id", "repo_id", "from_path", "to_path"], [
         [org_id, repo, "web/src/features/editor/toolbar.tsx", "web/src/features/export-pdf-legacy/button.tsx"],
         [org_id, repo, "services/editor/handlers/export.py", "services/export/pdf_v1/api.py"],
@@ -431,7 +478,8 @@ def _to_sql(org_id, manifest, teams, features, accounts, csm, usage, act, wi_row
         [org_id, repo, "services/integrations/slack/handlers/notify.py", "services/integrations/zapier_v1/lib/payload.py"],
         [org_id, repo, "services/importers/csv_v1/handlers/upload.py", "services/db/lib/bulk.py"],
         [org_id, repo, "services/sso/attribute_mapping/lib/apply.py", "services/auth/lib/session.py"],
-        [org_id, repo, "services/auth/handlers/login.py", "services/sso/attribute_mapping/lib/apply.py"]])
+        [org_id, repo, "services/auth/handlers/login.py", "services/sso/attribute_mapping/lib/apply.py"]]
+        + [[org_id, repo, a, b] for a, b in sorted(set(demo_edges))])
     if connector_data:
         s += _connector_facts(org_id, accounts, csm, usage, act, ticket_rows, suggestions, cost_lines)
     s += _insert("work_items", ["id", "org_id", "source", "external_id", "item_type", "kind", "priority", "team_id",

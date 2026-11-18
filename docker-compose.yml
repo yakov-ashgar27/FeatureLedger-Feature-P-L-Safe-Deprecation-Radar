@@ -24,6 +24,13 @@ x-connector-env: &connector-env
   AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
   AWS_REGION: ${AWS_REGION:-us-east-1}
   AWS_CE_TAG_KEY: ${AWS_CE_TAG_KEY:-feature}
+  # Phase 3: Feature Graph (LLM optional: without a key a deterministic local embedder is used)
+  LLM_API_KEY: ${LLM_API_KEY:-}
+  LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
+  LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+  EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+  GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+  GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
 
 services:
   db:
@@ -66,7 +73,6 @@ services:
       DEFAULT_ORG_SLUG: ${DEFAULT_ORG_SLUG:-northwind}
       ORG_NAME: ${ORG_NAME:-My Company}
       FL_API_TOKEN: ${FL_API_TOKEN:-}
-      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       CORS_ORIGINS: http://localhost:3000
     ports: ["8000:8000"]
     volumes:
