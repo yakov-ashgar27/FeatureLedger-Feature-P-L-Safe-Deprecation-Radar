@@ -42,7 +42,7 @@ class FeaturePnl:
     revenue_at_risk_arr: float = 0.0
     tickets: int = 0
     active_accounts: int = 0
-    paying_accounts_total: int = 0
+    eligible_accounts: int = 0
     anchor_accounts: int = 0
     classification: FeatureClass = FeatureClass.WATCH
     classification_reason: str = ""
@@ -57,7 +57,7 @@ class FeaturePnl:
 
     @property
     def adoption(self) -> float:
-        return self.active_accounts / self.paying_accounts_total if self.paying_accounts_total else 0.0
+        return self.active_accounts / self.eligible_accounts if self.eligible_accounts else 0.0
 
     def value(self, model: AttributionModel) -> float:
         if model is AttributionModel.TIER_GATED:
@@ -133,7 +133,7 @@ def compute_pnl(ds: Dataset, months: list[date]) -> PnlResult:
             r.revenue_at_risk_arr = att.revenue_at_risk.get(f.id, 0.0)
             r.active_accounts = att.active_accounts.get(f.id, 0)
             r.anchor_accounts = att.anchor_accounts.get(f.id, 0)
-            r.paying_accounts_total = att.paying_accounts
+            r.eligible_accounts = att.eligible_accounts.get(f.id, 0)
         _allocate_overhead(m, ds.features, rows)
 
     for i, m in enumerate(months):

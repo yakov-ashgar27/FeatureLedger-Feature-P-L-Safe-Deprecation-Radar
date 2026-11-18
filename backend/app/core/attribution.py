@@ -77,6 +77,9 @@ class MonthAttribution:
     revenue_at_risk: dict[str, float] = field(default_factory=lambda: defaultdict(float))
     active_accounts: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     anchor_accounts: dict[str, int] = field(default_factory=lambda: defaultdict(int))
+    # adoption denominator: paying accounts whose tier can use the feature (Enterprise-only features
+    # are measured against Enterprise accounts, otherwise they would always look "niche")
+    eligible_accounts: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     per_account: list[AccountFeatureValue] = field(default_factory=list)
     unattributed_mrr: float = 0.0
     paying_accounts: int = 0
@@ -103,6 +106,10 @@ def attribute_month(
         res.total_mrr += mrr
         if a.arr_usd > 0:
             res.paying_accounts += 1
+            rank_a = TIER_RANK.get(a.plan_tier, 0)
+            for f in product.values():
+                if not f.tier_gate or TIER_RANK.get(f.tier_gate, 99) <= rank_a:
+                    res.eligible_accounts[f.id] += 1
         rows = by_acct.get(a.id, [])
         e = {u.feature_id: engagement(u.active_days, u.active_users) for u in rows}
         e_total = sum(e.values())

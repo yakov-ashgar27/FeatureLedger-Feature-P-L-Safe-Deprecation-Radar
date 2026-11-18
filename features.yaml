@@ -1,0 +1,206 @@
+# FeatureLedger manifest for Northwind Cloud (seed company: 45 engineers, ~$15M ARR).
+# Tier 1 of entity resolution: explicit, code-reviewed ownership of paths, routes, events and flags.
+# Validate locally:  curl -X POST localhost:8000/api/v1/manifest/validate --data-binary @features.yaml
+version: 1
+
+ignore:
+  - "**/fixtures/**"
+  - "**/*.stories.tsx"
+
+features:
+  # ----------------------------------------------------------------- core product
+  - key: document-editor
+    name: Document Editor
+    owner_team: editor
+    launched_at: 2019-03-01
+    paths: ["web/src/features/editor/**", "services/editor/**"]
+    api_routes: ["/api/v1/documents*"]
+    events: [doc_edited, doc_created]
+    jira: { labels: [editor], epics: [ED-1] }
+    cost_tags: [editor]
+
+  - key: realtime-collab
+    name: Real-time Collaboration
+    owner_team: collaboration
+    launched_at: 2020-02-01
+    paths: ["services/collab/**", "web/src/features/presence/**"]
+    api_routes: ["/ws/collab*"]
+    events: [collab_session_joined]
+    cost_tags: [collab]
+
+  - key: comments-mentions
+    name: Comments & Mentions
+    owner_team: collaboration
+    launched_at: 2020-06-01
+    paths: ["services/comments/**", "web/src/features/comments/**"]
+    api_routes: ["/api/v1/comments*"]
+    events: [comment_posted, mention_sent]
+
+  - key: templates-library
+    name: Templates Library
+    owner_team: editor
+    launched_at: 2021-01-01
+    paths: ["services/templates/**", "web/src/features/templates/**"]
+    api_routes: ["/api/v1/templates*"]
+    events: [template_used]
+
+  - key: public-share-links
+    name: Public Share Links
+    owner_team: collaboration
+    launched_at: 2021-04-01
+    paths: ["services/sharing/**", "web/src/features/share/**"]
+    api_routes: ["/api/v1/share*", "/s/*"]
+    events: [share_link_created]
+
+  - key: analytics-dashboard
+    name: Workspace Analytics
+    owner_team: collaboration
+    launched_at: 2022-02-01
+    paths: ["services/analytics/**", "web/src/features/analytics/**"]
+    api_routes: ["/api/v1/analytics*"]
+    events: [analytics_viewed]
+    cost_tags: [analytics]
+
+  # ----------------------------------------------------------------- documents & export
+  - key: e-signatures
+    name: E-Signatures
+    owner_team: docs-platform
+    launched_at: 2021-09-01
+    tier_gate: pro
+    paths: ["services/esign/**", "web/src/features/esign/**"]
+    api_routes: ["/api/v1/signatures*"]
+    events: [signature_requested, signature_completed]
+    flag_key: esign
+
+  - key: pdf-export-v2
+    name: PDF Export v2
+    owner_team: docs-platform
+    launched_at: 2024-05-01
+    paths: ["services/export/pdf_v2/**", "web/src/features/export/**"]
+    api_routes: ["/api/v2/export*"]
+    events: [pdf_exported_v2]
+    cost_tags: [pdf-render]
+
+  - key: legacy-pdf-export
+    name: Legacy PDF Exporter
+    description: wkhtmltopdf-based exporter kept alive for a 2019 enterprise promise.
+    owner_team: docs-platform
+    launched_at: 2019-01-01
+    paths: ["services/export/pdf_v1/**", "web/src/features/export-pdf-legacy/**"]
+    api_routes: ["/api/v1/export-pdf*"]
+    events: [pdf_exported]
+    event_aliases: [export_pdf_clicked]
+    flag_key: legacy-pdf-export
+    replaced_by: pdf-export-v2
+    jira: { labels: [pdf-legacy] }
+    support_tags: [pdf-export]
+
+  - key: bulk-csv-import-v1
+    name: Bulk CSV Import v1
+    owner_team: docs-platform
+    launched_at: 2019-08-01
+    paths: ["services/importers/csv_v1/**"]
+    api_routes: ["/api/v1/import/csv*"]
+    events: [csv_import_started]
+    flag_key: bulk-csv-import-v1
+
+  # ----------------------------------------------------------------- integrations
+  - key: slack-integration
+    name: Slack Integration
+    owner_team: integrations
+    launched_at: 2021-03-01
+    paths: ["services/integrations/slack/**"]
+    api_routes: ["/integrations/slack*"]
+    events: [slack_notification_sent]
+    flag_key: slack
+
+  - key: salesforce-sync
+    name: Salesforce Sync
+    owner_team: integrations
+    launched_at: 2022-06-01
+    tier_gate: enterprise
+    paths: ["services/integrations/salesforce/**"]
+    api_routes: ["/integrations/salesforce*"]
+    events: [sfdc_sync_run]
+    flag_key: salesforce-sync
+
+  - key: zapier-v1-webhooks
+    name: Zapier v1 Webhooks
+    owner_team: integrations
+    launched_at: 2019-11-01
+    paths: ["services/integrations/zapier_v1/**"]
+    api_routes: ["/hooks/v1/zapier*"]
+    events: [zapier_v1_hook_fired]
+    flag_key: zapier-v1
+    replaced_by: slack-integration
+
+  # ----------------------------------------------------------------- enterprise
+  - key: approval-workflows
+    name: Approval Workflows
+    owner_team: enterprise
+    launched_at: 2022-01-01
+    tier_gate: enterprise
+    paths: ["services/approvals/**", "web/src/features/approvals/**"]
+    api_routes: ["/api/v1/approvals*"]
+    events: [approval_requested]
+    flag_key: approvals
+
+  - key: saml-attribute-mapping
+    name: Custom SAML Attribute Mapping
+    description: Built in 2023 for Globex's identity team; nobody else really uses it.
+    owner_team: enterprise
+    launched_at: 2023-03-01
+    tier_gate: enterprise
+    paths: ["services/sso/attribute_mapping/**"]
+    api_routes: ["/api/v1/sso/attribute-map*"]
+    events: [saml_attr_map_applied]
+    flag_key: saml-attr-mapping
+
+  - key: gdpr-data-export
+    name: GDPR Data Export
+    owner_team: enterprise
+    launched_at: 2018-05-25
+    regulatory: true
+    paths: ["services/privacy/export/**"]
+    api_routes: ["/api/v1/privacy/export*"]
+    events: [gdpr_export_requested]
+
+  # ----------------------------------------------------------------- AI
+  - key: ai-summaries
+    name: AI Summaries
+    owner_team: ai
+    launched_at: 2026-04-01
+    paths: ["services/ai/summaries/**", "web/src/features/ai-summary/**"]
+    api_routes: ["/api/v1/ai/summarize*"]
+    events: [ai_summary_generated]
+    flag_key: ai-summaries
+    cost_tags: [llm-summaries]
+
+  # ----------------------------------------------------------------- shared overhead (platform)
+  - key: platform-auth-sso
+    name: Auth & SSO Core
+    owner_team: platform
+    shared_overhead: true
+    allocation_rule: proportional_usage
+    paths: ["services/auth/**", "services/sso/core/**"]
+
+  - key: design-system
+    name: Design System
+    owner_team: platform
+    shared_overhead: true
+    allocation_rule: proportional_usage
+    paths: ["web/src/design-system/**"]
+
+  - key: billing-core
+    name: Billing Core
+    owner_team: platform
+    shared_overhead: true
+    allocation_rule: proportional_usage
+    paths: ["services/billing/**"]
+
+  - key: data-platform
+    name: Data Platform
+    owner_team: platform
+    shared_overhead: true
+    allocation_rule: proportional_cost
+    paths: ["services/db/**", "infra/**"]

@@ -36,3 +36,10 @@ ALTER TABLE organizations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE organizations FORCE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation ON organizations
     USING (id = nullif(current_setting('app.org_id', true), '')::uuid);
+
+-- The only cross-tenant lookup the app may do: slug -> id, to start a tenant-scoped session.
+-- SECURITY DEFINER runs as the migration owner (bypasses RLS) but returns nothing but the id.
+CREATE FUNCTION resolve_org_slug(p_slug text) RETURNS uuid
+    LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS
+$$ SELECT id FROM organizations WHERE slug = p_slug $$;
+REVOKE ALL ON FUNCTION resolve_org_slug(text) FROM PUBLIC;

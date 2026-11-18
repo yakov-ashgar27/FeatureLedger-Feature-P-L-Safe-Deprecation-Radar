@@ -35,10 +35,10 @@ def test_value_models():
 def test_classification_order():
     f = Feature("f", "f", "F", launched_at=date(2021, 1, 1))
     zombie = [row(m, c_eng=3000, eng_hours=30, bug_hours=15, v_usage=200, active_accounts=4,
-                  paying_accounts_total=200) for m in MONTHS]
+                  eligible_accounts=200) for m in MONTHS]
     assert classify(f, zombie, S)[0] is FeatureClass.ZOMBIE
     anchor = [row(m, c_eng=3000, eng_hours=30, bug_hours=15, v_usage=200, active_accounts=4,
-                  paying_accounts_total=200, anchor_accounts=1, revenue_at_risk_arr=126_000) for m in MONTHS]
+                  eligible_accounts=200, anchor_accounts=1, revenue_at_risk_arr=126_000) for m in MONTHS]
     assert classify(f, anchor, S)[0] is FeatureClass.NICHE_ANCHOR  # anchor wins over zombie
     reg = Feature("g", "gdpr", "GDPR", is_regulatory=True)
     assert classify(reg, zombie, S)[0] is FeatureClass.MANDATED
@@ -46,13 +46,13 @@ def test_classification_order():
     assert classify(plat, zombie, S)[0] is FeatureClass.PLATFORM
     young = Feature("ai", "ai", "AI", launched_at=date(2026, 5, 1))
     growth = [row(m, c_eng=9000, c_infra=6000, v_usage=4000, active_accounts=20 + 10 * i,
-                  paying_accounts_total=200) for i, m in enumerate(MONTHS)]
+                  eligible_accounts=200) for i, m in enumerate(MONTHS)]
     assert classify(young, growth, S)[0] is FeatureClass.GROWTH_BET
-    cow = [row(m, c_eng=10_000, v_usage=60_000, active_accounts=180, paying_accounts_total=200) for m in MONTHS]
+    cow = [row(m, c_eng=10_000, v_usage=60_000, active_accounts=180, eligible_accounts=200) for m in MONTHS]
     assert classify(f, cow, S)[0] is FeatureClass.CASH_COW
     # a rising feature is never a zombie even if currently unprofitable
     rising = [row(m, c_eng=3000, eng_hours=30, bug_hours=15, v_usage=200, active_accounts=2 + i,
-                  paying_accounts_total=200) for i, m in enumerate(MONTHS)]
+                  eligible_accounts=200) for i, m in enumerate(MONTHS)]
     assert classify(f, rising, S)[0] is not FeatureClass.ZOMBIE
 
 

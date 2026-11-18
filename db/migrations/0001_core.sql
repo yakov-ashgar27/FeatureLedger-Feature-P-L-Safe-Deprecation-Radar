@@ -345,7 +345,7 @@ CREATE TABLE feature_pnl_monthly (
     revenue_at_risk_arr    numeric(14,2) NOT NULL,      -- counterfactual, NOT additive across features
     tickets                integer NOT NULL,
     active_accounts        integer NOT NULL,
-    paying_accounts_total  integer NOT NULL,
+    eligible_accounts      integer NOT NULL,         -- paying accounts on a tier that can use the feature
     anchor_accounts        integer NOT NULL,
     bug_tax_ratio          numeric(5,4) NOT NULL,
     classification         feature_class NOT NULL,

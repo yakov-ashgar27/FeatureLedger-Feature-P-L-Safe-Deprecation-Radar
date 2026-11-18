@@ -81,6 +81,7 @@ class FeatureSpec:
     allocation_weights: dict[str, float] | None = None
     regulatory: bool = False
     launched_at: str | None = None
+    replaced_by: str | None = None   # feature key customers should migrate to
 
 
 @dataclass
@@ -228,10 +229,13 @@ def manifest_from_dict(doc: Any) -> Manifest:
             tier_gate=tier, shared_overhead=shared, allocation_rule=rule,
             allocation_weights=weights, regulatory=bool(rf.get("regulatory", False)),
             launched_at=str(rf["launched_at"]) if rf.get("launched_at") else None,
+            replaced_by=rf.get("replaced_by"),
         ))
 
     keys = {s.key for s in specs}
     for s in specs:
+        if s.replaced_by and s.replaced_by not in keys:
+            errors.append(f"{s.key}: replaced_by references unknown feature {s.replaced_by!r}")
         for k in (s.allocation_weights or {}):
             if k not in keys:
                 errors.append(f"{s.key}: allocation_weights references unknown feature {k!r}")
