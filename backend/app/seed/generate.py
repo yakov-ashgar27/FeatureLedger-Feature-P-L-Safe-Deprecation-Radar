@@ -128,7 +128,8 @@ def build(manifest_text: str, rng_seed: int = 42) -> Seed:
     org_id = uid("org", ORG_SLUG)
     settings = OrgSettings()
 
-    teams = [Team(uid("team", k), k, n, h) for k, n, h in TEAMS]
+    team_rows = [(t.key, t.name, t.headcount) for t in manifest.teams] or TEAMS
+    teams = [Team(uid("team", k), k, n, h) for k, n, h in team_rows]
     team_by_key = {t.key: t for t in teams}
     features = [Feature(
         id=uid("feature", s.key), key=s.key, name=s.name,

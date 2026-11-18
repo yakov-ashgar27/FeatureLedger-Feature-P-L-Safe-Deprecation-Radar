@@ -68,6 +68,18 @@ async def seed_if_empty(conn: asyncpg.Connection) -> str | None:
     return seed.org_id
 
 
+async def bootstrap_real_org(conn: asyncpg.Connection) -> str:
+    """Real-data mode: create the org named by DEFAULT_ORG_SLUG/ORG_NAME and apply features.yaml."""
+    from .bootstrap import apply_manifest, ensure_org
+    from .core.manifest import parse_manifest
+    manifest = parse_manifest(config.manifest_path.read_text())
+    async with conn.transaction():
+        org_id = await ensure_org(conn, config.default_org_slug, config.org_name)
+        stats = await apply_manifest(conn, org_id, manifest)
+    log.info("org %s (%s): applied features.yaml %s", config.default_org_slug, org_id, stats)
+    return org_id
+
+
 async def main(seed: bool) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     for attempt in range(30):  # wait for postgres in docker-compose
@@ -82,7 +94,10 @@ async def main(seed: bool) -> None:
         await _init_conn(conn)
         await apply_migrations(conn)
         await provision_app_role(conn)
-        org_id = await seed_if_empty(conn) if seed else None
+        if seed:
+            org_id = await seed_if_empty(conn)
+        else:
+            org_id = await bootstrap_real_org(conn)
     finally:
         await conn.close()
     if org_id:

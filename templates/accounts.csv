@@ -1,0 +1,4 @@
+external_ref,name,plan_tier,arr_usd,renewal_date,health,csm_email
+cus_globex,Globex,enterprise,180000,2026-12-15,green,dana@yourco.com
+cus_initech,Initech,pro,36000,2027-03-01,yellow,omer@yourco.com
+cus_hooli,Hooli,starter,6000,,green,

@@ -22,7 +22,9 @@ def _f(v) -> float:
 
 async def available_months(conn: asyncpg.Connection) -> list[date]:
     rows = await conn.fetch("""SELECT DISTINCT period_month FROM account_snapshots
-                               UNION SELECT DISTINCT period_month FROM usage_signals ORDER BY 1""")
+                               UNION SELECT DISTINCT period_month FROM usage_signals
+                               UNION SELECT DISTINCT period_month FROM work_items WHERE merged_at IS NOT NULL
+                               ORDER BY 1""")
     return [r[0] for r in rows]
 
 

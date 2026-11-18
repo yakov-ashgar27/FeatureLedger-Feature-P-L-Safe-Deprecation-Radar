@@ -84,11 +84,19 @@ class FeatureSpec:
     replaced_by: str | None = None   # feature key customers should migrate to
 
 
+@dataclass(frozen=True)
+class TeamSpec:
+    key: str
+    name: str
+    headcount: int  # engineers only; drives the capacity calibration (docs/SPEC.md §3)
+
+
 @dataclass
 class Manifest:
     version: int
     features: list[FeatureSpec]
     ignore: list[str] = field(default_factory=lambda: list(DEFAULT_IGNORE))
+    teams: list[TeamSpec] = field(default_factory=list)
 
     def by_key(self) -> dict[str, FeatureSpec]:
         return {f.key: f for f in self.features}
@@ -260,10 +268,31 @@ def manifest_from_dict(doc: Any) -> Manifest:
                 errors.append(f"flag {s.flag_key!r} claimed by both {flags[s.flag_key]!r} and {s.key!r}")
             flags[s.flag_key] = s.key
 
+    teams: list[TeamSpec] = []
+    raw_teams = doc.get("teams") or []
+    if not isinstance(raw_teams, list):
+        errors.append("'teams' must be a list")
+        raw_teams = []
+    for i, t in enumerate(raw_teams):
+        if not isinstance(t, dict) or not isinstance(t.get("key"), str) or not KEY_RE.match(t.get("key", "")):
+            errors.append(f"teams[{i}]: 'key' must match {KEY_RE.pattern}")
+            continue
+        hc = t.get("headcount")
+        if not isinstance(hc, int) or hc < 0 or hc > 2000:
+            errors.append(f"teams[{i}]({t['key']}): 'headcount' must be an integer between 0 and 2000")
+            continue
+        teams.append(TeamSpec(t["key"], str(t.get("name") or t["key"]), hc))
+    team_keys = {t.key for t in teams}
+    if len(team_keys) != len(teams):
+        errors.append("duplicate team key in 'teams'")
+    if teams:
+        for s in specs:
+            if s.owner_team and s.owner_team not in team_keys:
+                errors.append(f"{s.key}: owner_team {s.owner_team!r} is not declared under 'teams'")
+
     ignore = doc.get("ignore")
     if ignore is not None and (not isinstance(ignore, list) or not all(isinstance(x, str) for x in ignore)):
         errors.append("'ignore' must be a list of globs")
     if errors:
         raise ManifestError(errors)
-    return Manifest(version=1, features=specs,
-                    ignore=list(DEFAULT_IGNORE) + list(ignore or []))
+    return Manifest(version=1, features=specs, ignore=list(DEFAULT_IGNORE) + list(ignore or []), teams=teams)

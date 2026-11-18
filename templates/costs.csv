@@ -1,0 +1,5 @@
+feature,cost_type,amount_usd
+document-editor,infra,9100
+legacy-pdf-export,infra,410
+ai-summaries,llm,6200
+,infra,3000

@@ -82,3 +82,10 @@ def test_compute_pnl_end_to_end_small():
     assert ed.c_overhead_alloc + pdf.c_overhead_alloc == pytest.approx(auth.c_total)
     assert auth.classification is FeatureClass.PLATFORM
     assert pdf.bug_tax_ratio == pytest.approx(1.0)
+
+
+def test_no_usage_data_never_yields_zombie():
+    f = Feature("f", "f", "F", launched_at=date(2021, 1, 1))
+    git_only = [row(m, c_eng=9000, eng_hours=90, bug_hours=60, eligible_accounts=0) for m in MONTHS]
+    cls, why = classify(f, git_only, S)
+    assert cls is FeatureClass.WATCH and "import" in why

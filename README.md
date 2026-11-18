@@ -4,6 +4,8 @@ FeatureLedger gives every in-house product feature a monthly **profit & loss** s
 engineering effort (Git), support load, cloud and LLM spend, and tenant-level usage and ARR.
 It then turns a "Zombie" verdict into a **guarded, reversible deletion workflow**.
 
+**מדריך הפעלה מלא בעברית, צעד אחר צעד:** [`docs/GETTING_STARTED.he.md`](docs/GETTING_STARTED.he.md)
+
 This is **Phase 1 (MVP v0.1)**. It runs locally out of the box with a realistic seed company:
 *Northwind Cloud*, 45 engineers in 7 teams, ~520 accounts, ~$14M ARR, 22 features and 6 months of history.
 
@@ -39,9 +41,10 @@ backend/app/ingest/   GitHub ingester + allowlist scrubber (no author identity, 
 backend/app/jobs/     P&L job: DB → engine → ledger tables
 backend/app/api/      FastAPI routes
 backend/app/seed/     deterministic Northwind Cloud generator
-backend/tests/        42 tests: formulas, guards, scrubber, seed end-to-end invariants
+backend/tests/        48 tests: formulas, guards, scrubber, seed end-to-end invariants
 web/                  Next.js 15 dashboard: ledger + quadrant, tear-sheet, simulator, sunset board, triage
-features.yaml         Tier 1 Feature Graph manifest for the seed company
+features.yaml         Tier 1 Feature Graph manifest (teams + features) for the seed company
+templates/            CSV templates: accounts, usage, tickets, costs
 docs/SPEC.md          formulas, state machine, API, design decisions
 ```
 
@@ -52,6 +55,15 @@ make test                         # backend tests, no database required
 cd backend && python -m app.migrate   # migrate/seed against ADMIN_DATABASE_URL
 cd web && npm install && npm run dev  # dashboard on :3000 (API_URL defaults to localhost:8000)
 ```
+
+### Use your own data
+
+1. Describe your teams and features in `features.yaml`.
+2. In `.env`, set `SEED_ON_START=false`, `DEFAULT_ORG_SLUG` and `ORG_NAME`.
+3. Run `docker compose down -v && docker compose up --build -d`.
+4. Import CSVs from `templates/`: `make import KIND=accounts FILE=accounts.csv PERIOD=2026-10`. Do the same for `usage`, `tickets` and `costs`, then run `make pnl`.
+
+Until accounts and usage are imported, every feature is classified **Watch**: cost alone never makes a Zombie.
 
 ### Ingest a real repository
 

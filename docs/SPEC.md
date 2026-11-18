@@ -122,7 +122,7 @@ Rules use a trailing 3-month window and run in this order; the first match wins:
 1. `platform`: the feature is shared overhead.
 2. `mandated`: the feature is regulatory (GDPR export, for example). It can never be sunset.
 3. `niche_anchor`: adoption is under 10% and at least one anchor account exists. *Do not kill blindly.*
-4. `zombie`: all of these hold:
+4. `zombie`: needs at least 2 months of data, and all of these hold:
    - adoption is under 5%
    - the 3-month net is negative
    - the active-account trend is ≤ 0
@@ -193,6 +193,8 @@ stateDiagram-v2
 | POST | `/api/v1/sunset-plans/{id}/advance` · `/rollback` · `/cancel` | Guarded transitions (409 with `code` on guard failure) |
 | GET/POST | `/api/v1/triage`, `/api/v1/triage/{id}` | Feature Graph triage queue |
 | POST | `/api/v1/manifest/validate` | Validate a `features.yaml` body |
+| POST | `/api/v1/manifest/apply` | Sync `features.yaml` (teams, features, Tier 1 mappings) into the database |
+| POST | `/api/v1/import/{accounts\|usage\|tickets\|costs}?period=YYYY-MM` | CSV import (templates in `/templates`), all-or-nothing with line-numbered errors |
 | POST | `/api/v1/jobs/compute-pnl` | Recompute every month |
 | POST | `/api/v1/integrations/github/sync` | Ingest a repository (needs `GITHUB_TOKEN`) |
 | GET | `/api/v1/periods`, `/teams`, `/integrations`, `/settings`, `/health` | Supporting reads |
@@ -213,7 +215,7 @@ The scatter uses categorical slots 1–3 (blue `#2a78d6`, orange `#eb6834`, aqua
 
 ## 10. Not in Phase 1 (next)
 
-- Jira/Linear, PostHog, Stripe, Zendesk and AWS live connectors (the schema and inbox are ready; the seed stands in for them).
+- Jira/Linear, PostHog, Stripe, Zendesk and AWS live connectors. Until then, CSV imports cover accounts, usage, tickets and costs. The schema and inbox are ready for the live versions.
 - Tier 2 import-graph clustering and Tier 3 embedding jobs (the tables and triage loop exist).
 - Pulling `features.yaml` from the repo on push.
 - LaunchDarkly/Statsig flag toggling and evaluation counts.

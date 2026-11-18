@@ -1,0 +1,4 @@
+external_id,account_ref,feature,created_at,handle_minutes
+ZD-1001,cus_initech,pdf-export,2026-10-03T09:12:00Z,45
+ZD-1002,cus_globex,saml-attribute-mapping,2026-10-07T14:30:00Z,70
+ZD-1003,cus_hooli,,2026-10-09T08:00:00Z,20

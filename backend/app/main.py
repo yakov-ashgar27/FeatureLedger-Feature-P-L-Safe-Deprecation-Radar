@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .api import admin, pnl, sunset
+from .api import admin, imports, pnl, sunset
 from .config import config
 from .db import close_pool, init_pool, org_tx
 
@@ -27,6 +27,7 @@ app.add_middleware(CORSMiddleware, allow_origins=list(config.cors_origins), allo
 app.include_router(pnl.router)
 app.include_router(sunset.router)
 app.include_router(admin.router)
+app.include_router(imports.router)
 
 
 @app.get("/health")

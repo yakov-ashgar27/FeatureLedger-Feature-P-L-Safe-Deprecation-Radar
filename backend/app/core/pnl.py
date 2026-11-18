@@ -10,7 +10,8 @@ Per feature f and month m (Contribution view = direct, avoidable cost):
 Fully-loaded view adds C_overhead_alloc: the cost of shared-overhead features spread by their
 allocation_rule (proportional_usage | proportional_cost | fixed_weights; 'none' = platform line only).
 
-Classification uses a trailing window (default 3 months) and is evaluated in a fixed order;
+Classification uses a trailing window (default 3 months) and is evaluated in a fixed order
+(a Zombie verdict needs at least 2 months of data, because it is a statement about a trend);
 the first rule that matches wins, and the reason string records the evidence.
 """
 from __future__ import annotations
@@ -176,6 +177,9 @@ def classify(f: Feature, window: list[FeaturePnl], s: OrgSettings) -> tuple[Feat
     if f.is_regulatory:
         return FeatureClass.MANDATED, "Regulatory/compliance requirement: exempt from sunset"
 
+    if cur.eligible_accounts == 0:
+        # No revenue/usage data yet (only Git connected): never call anything a zombie on cost alone.
+        return FeatureClass.WATCH, "No usage or revenue data for this month yet: import accounts and usage"
     n = len(window)
     c_avg = sum(r.c_total for r in window) / n
     net = sum(r.v_usage - r.c_total for r in window)
@@ -194,7 +198,7 @@ def classify(f: Feature, window: list[FeaturePnl], s: OrgSettings) -> tuple[Feat
         return FeatureClass.NICHE_ANCHOR, (
             f"Adoption {adoption:.1%} but {cur.anchor_accounts} account(s) ≥${s.anchor_min_arr_usd:,.0f} ARR "
             f"depend on it; ${cur.revenue_at_risk_arr:,.0f} ARR at risk. Do not kill blindly")
-    if (adoption < s.zombie_max_adoption and net < 0 and trend <= 0
+    if (n >= 2 and adoption < s.zombie_max_adoption and net < 0 and trend <= 0
             and (bug_tax >= s.zombie_min_bug_tax or c_avg >= s.zombie_min_monthly_cost)):
         return FeatureClass.ZOMBIE, (
             f"Adoption {adoption:.1%}, {n}-mo net ${net:,.0f}, bug tax {bug_tax:.0%}, "

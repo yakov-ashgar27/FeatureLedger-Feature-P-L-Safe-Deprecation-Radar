@@ -1,4 +1,4 @@
-.PHONY: up down reset test seed-sql logs sync-github
+.PHONY: up down reset test seed-sql logs sync-github import apply-manifest pnl
 
 up:            ## build and start everything (http://localhost:3000)
 	docker compose up --build -d && docker compose ps
@@ -21,3 +21,12 @@ seed-sql:      ## write the deterministic seed as plain SQL
 sync-github:   ## ingest a real repo: make sync-github REPO=owner/name
 	curl -s -X POST localhost:8000/api/v1/integrations/github/sync -H 'Content-Type: application/json' \
 	  -d '{"repo": "$(REPO)"}'
+
+apply-manifest: ## re-read features.yaml into the Feature Graph
+	curl -s -X POST localhost:8000/api/v1/manifest/apply; echo
+
+import:        ## make import KIND=accounts FILE=templates/accounts.csv PERIOD=2026-10
+	curl -s -X POST "localhost:8000/api/v1/import/$(KIND)?period=$(PERIOD)" --data-binary @$(FILE); echo
+
+pnl:           ## recompute the P&L for every month
+	curl -s -X POST localhost:8000/api/v1/jobs/compute-pnl; echo

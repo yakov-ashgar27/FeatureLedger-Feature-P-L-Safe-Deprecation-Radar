@@ -24,6 +24,8 @@ class Config:
         "FEATURES_MANIFEST", Path(__file__).resolve().parents[2] / "features.yaml")))
     seed_on_start: bool = field(default_factory=lambda: _bool(os.environ.get("SEED_ON_START"), True))
     default_org_slug: str = field(default_factory=lambda: os.environ.get("DEFAULT_ORG_SLUG", "northwind"))
+    # real-data mode (SEED_ON_START=false): the organization created on first start
+    org_name: str = field(default_factory=lambda: os.environ.get("ORG_NAME", "My Company"))
     # Phase 1 auth: one static bearer token (unset = open dev mode). Phase 2: OIDC + per-user roles.
     api_token: str | None = field(default_factory=lambda: os.environ.get("FL_API_TOKEN") or None)
     github_token: str | None = field(default_factory=lambda: os.environ.get("GITHUB_TOKEN") or None)

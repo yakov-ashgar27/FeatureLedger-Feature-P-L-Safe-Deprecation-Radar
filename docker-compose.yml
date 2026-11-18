@@ -23,11 +23,15 @@ services:
       DATABASE_URL: postgresql://featureledger_app:${APP_DB_PASSWORD:-app_dev_password}@db:5432/featureledger
       APP_DB_PASSWORD: ${APP_DB_PASSWORD:-app_dev_password}
       SEED_ON_START: ${SEED_ON_START:-true}
-      DEFAULT_ORG_SLUG: northwind
+      DEFAULT_ORG_SLUG: ${DEFAULT_ORG_SLUG:-northwind}
+      ORG_NAME: ${ORG_NAME:-My Company}
       FL_API_TOKEN: ${FL_API_TOKEN:-}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       CORS_ORIGINS: http://localhost:3000
     ports: ["8000:8000"]
+    volumes:
+      # edit features.yaml on your machine, then POST /api/v1/manifest/apply (or restart the api)
+      - ./features.yaml:/srv/features.yaml:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 5s

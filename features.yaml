@@ -3,6 +3,17 @@
 # Validate locally:  curl -X POST localhost:8000/api/v1/manifest/validate --data-binary @features.yaml
 version: 1
 
+# Engineering teams and how many engineers each has (no names: headcount only).
+# Headcount x 140 h x 80% is the monthly capacity that PR effort is calibrated to.
+teams:
+  - { key: editor,        name: Editor,        headcount: 9 }
+  - { key: collaboration, name: Collaboration, headcount: 7 }
+  - { key: docs-platform, name: Docs Platform, headcount: 6 }
+  - { key: integrations,  name: Integrations,  headcount: 6 }
+  - { key: ai,            name: AI,            headcount: 5 }
+  - { key: enterprise,    name: Enterprise,    headcount: 5 }
+  - { key: platform,      name: Platform,      headcount: 7 }
+
 ignore:
   - "**/fixtures/**"
   - "**/*.stories.tsx"
