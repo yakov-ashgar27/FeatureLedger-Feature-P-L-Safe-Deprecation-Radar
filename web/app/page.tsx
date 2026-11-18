@@ -3,7 +3,7 @@ import { Segmented } from "@/components/Controls";
 import { LedgerTable } from "@/components/LedgerTable";
 import { QuadrantScatter } from "@/components/QuadrantScatter";
 import { ErrorBox, Kpi, SectionTitle } from "@/components/ui";
-import { apiGet } from "@/lib/api";
+import { serverLoad } from "@/lib/server";
 import { num, usdShort } from "@/lib/format";
 import type { Ledger } from "@/lib/types";
 
@@ -18,12 +18,9 @@ export default async function LedgerPage({ searchParams }: { searchParams: Promi
   const win = sp.window ?? "3";
   const qs = new URLSearchParams({ model, view, window: win, ...(sp.period ? { period: sp.period } : {}) });
 
-  let data: Ledger;
-  try {
-    data = await apiGet<Ledger>(`/api/v1/pnl?${qs}`);
-  } catch (e) {
-    return <ErrorBox error={`Could not load the ledger: ${(e as Error).message}. Is the API running?`} />;
-  }
+  const res = await serverLoad<Ledger>(`/api/v1/pnl?${qs}`, `/?${qs}`);
+  if (res.error !== null) return <ErrorBox error={`Could not load the ledger: ${res.error}. Is the API running?`} />;
+  const data = res.data;
   const s = data.summary;
   const hoursPerFte = 140 * 0.8;
 

@@ -1,4 +1,4 @@
-# FeatureLedger: specification (as built, Phases 1–3)
+# FeatureLedger: specification (as built, Phases 1–4)
 
 This document describes what the code in this repository does, and why. Every formula below has
 a unit test in `backend/tests/`, and the section numbers are referenced from code comments.
@@ -161,10 +161,10 @@ stateDiagram-v2
   blast_radius_checked --> customer_outreach: dossier built and CS sign-off if any account risk ≥ 0.5
   customer_outreach --> canary_dark_launch: flag exists and accounts contacted (or 14 days)
   canary_dark_launch --> canary_dark_launch: promote zero_usage_off → fully_off
-  canary_dark_launch --> dead_code_pr_opened: scream test ≥ N quiet days, 0 tickets, 0 'on' evaluations, PR outline ready
-  dead_code_pr_opened --> archived: PR merged
-  canary_dark_launch --> customer_outreach: rollback (flag re-enabled)
-  dead_code_pr_opened --> customer_outreach: rollback
+  canary_dark_launch --> dead_code_pr_opened: scream test ≥ N quiet days, 0 tickets, 0 'on' evaluations → PR opened
+  dead_code_pr_opened --> archived: PR merge webhook
+  canary_dark_launch --> customer_outreach: rollback (flag fully_on, rollback_count + 1)
+  dead_code_pr_opened --> customer_outreach: rollback (flag fully_on, PR closed)
   candidate_for_sunset --> cancelled
   blast_radius_checked --> cancelled
   customer_outreach --> cancelled
@@ -198,6 +198,17 @@ stateDiagram-v2
 | POST | `/api/v1/jobs/compute-pnl` | Recompute every month |
 | POST | `/api/v1/integrations/github/sync` | Ingest a repository (needs `GITHUB_TOKEN`) |
 | GET | `/api/v1/periods`, `/teams`, `/integrations`, `/settings`, `/health` | Supporting reads |
+| PUT | `/api/v1/settings` | Change org_settings (admin), recomputes the P&L |
+| GET/POST | `/api/v1/auth/config` · `/auth/dev-login` · `/auth/oidc/login` · `/auth/oidc/callback` · `/auth/me` · `/auth/logout` · `/auth/rbac` | Sign-in (§12.3) |
+| GET/PATCH | `/api/v1/users`, `/api/v1/users/{id}` | Users and roles (admin) |
+| GET | `/api/v1/flags`, `/api/v1/flags/{key}/evaluations` | Flags under control, evaluation buckets |
+| POST | `/api/v1/flags/{key}/evaluations` (sandbox) · `/api/v1/flags/ingest` · `/api/v1/flags/webhooks/statsig?org=` | Inject / pull / receive evaluations |
+| GET | `/api/v1/sunset-plans/{id}/scream-test` | Scream-test evidence and daily evaluation counts |
+| POST | `/api/v1/sunset-plans/{id}/cleanup-pr/simulate-merge` (sandbox) | Deliver the GitHub merge webhook |
+| POST | `/api/v1/webhooks/{kind}/{integration_id}` | Vendor webhooks; GitHub `push` (manifest) and `pull_request` (cleanup merge) |
+
+Every route except `/health`, `/auth/config`, the sign-in endpoints and webhooks needs a session (§12.3) and the
+permission in §12.4.
 
 ## 8. Dashboard colour
 
@@ -305,9 +316,84 @@ An invalid manifest is recorded in `manifest_versions` with its structured error
 
 **When the graph runs:** after every sync (with that job's TextVault), after a manifest push, hourly, and on demand through `POST /api/v1/graph/run`.
 
-## 12. Not built yet (Phase 4)
+## 12. Phase 4: Safe Sunset execution and enterprise auth
+
+### 12.1 Live flag control (`app/flags`, `app/execution/orchestrator.py`)
+
+`FeatureFlagProvider` has two operations: `set_state(flag, state, keep_on_for, comment)` and
+`pull_evaluations(flag, since, until)`. Providers: LaunchDarkly (semantic patch on the flag's environment;
+the variation whose value is `true` is "on"), Statsig (Console API gate rules; exposures arrive by a signed
+event webhook, `v0=HMAC_SHA256(secret, "v0:{ts}:{body}")`, 5-minute tolerance) and sandbox. `FLAG_PROVIDER`
+chooses; empty means LaunchDarkly or Statsig when their key is set, else sandbox.
+
+| Transition | Flag | Evidence written |
+| --- | --- | --- |
+| outreach → canary | `zero_usage_off`: off, except accounts with `events > 0` in usage months overlapping the last 90 days (targeted by `FLAG_ACCOUNT_KEY`, default the Stripe customer id) | `canary.keep_on_for_count`, `flag_states` row |
+| promote | `fully_off` | `canary.fully_off_at` (scream-test clock) |
+| canary → PR | stays `fully_off` | `scream_test` block in the audit payload |
+| rollback / cancel from canary or PR | `fully_on` | `rollback_count + 1` (rollback), open PR closed |
+
+**Guards** at canary → PR, after re-pulling evaluations: `quiet_days ≥ scream_test_days`
+(`scream_test_running`), `Σ on_count` of buckets starting at or after `fully_off_at` = 0 (`flag_still_served`),
+tickets on the feature created at or after `fully_off_at` = 0 (`customer_screamed`). All three answer HTTP 409.
+The worker ingests evaluations every 15 minutes and writes one `scream_alert` note per change in the counts.
+
+**Fail closed.** Provider calls run inside the transition's database transaction; any provider error
+returns 502 and nothing is persisted. Closing a PR during a rollback is the one best-effort call (a rollback
+must never be blocked by GitHub).
+
+### 12.2 Cleanup PR (`app/cleanup`)
+
+`build_cleanup_change` is pure and shared by both providers:
+
+- **delete** every file under the feature's `paths` that `Manifest.owner_of` attributes to it (a more specific
+  glob of another feature wins). Live mode intersects with the repository tree, so nothing absent is "deleted".
+- **edit** `features.yaml`: the feature's item is cut out byte-for-byte (block or flow style) and the result
+  must parse; otherwise the PR says to edit it by hand.
+- **add** `.featureledger/sunset/<key>.json` (schema `featureledger.sunset-cleanup/v1`): call sites to edit,
+  flag checks to remove (search hints), routes, events, files deleted, scream-test evidence, audit chain head.
+
+Live sequence: ref → commit → recursive tree → contents(features.yaml) → `POST git/trees` (deletions as
+`sha: null`) → `POST git/commits` → `POST git/refs` `refs/heads/sunset/<key>` (422 → force-update) →
+`POST pulls` (422 → reuse the open PR, refresh its body) → label `featureledger-sunset`. The PR body names roles,
+never people. A GitHub `pull_request` event with `action=closed`, `merged=true` and head `sunset/*` advances the
+plan `dead_code_pr_opened → archived` with actor `github-webhook`, archives the feature and queues a graph +
+P&L run. Replays are idempotent; a PR closed without merge only marks the PR closed.
+
+### 12.3 Authentication (`app/auth`)
+
+- **Sessions:** HS256 JWT `{typ: session, sub: user id, org, amr, iat, exp, jti}`, 12 h by default, in an HttpOnly
+  SameSite=Lax cookie `fl_session` (Secure when `APP_URL` is https) or as a bearer token. Every request re-reads the
+  user through `auth_get_user` (a SECURITY DEFINER function): disabled users and org mismatches are refused at once.
+  Cookie-authenticated `POST/PUT/PATCH` must send `X-FL-CSRF: 1`.
+- **OIDC:** authorization code + PKCE (S256). `state`, `nonce` and the verifier travel in a signed 10-minute cookie
+  scoped to `/api/v1/auth/oidc`. The id_token signature is verified against the discovery document's JWKS (RS256 or
+  ES256; one refresh on key rotation), then `iss`, `aud` (+ `azp` if several audiences), `exp`/`iat` (60 s leeway),
+  `nonce`, `email_verified` and `OIDC_ALLOWED_DOMAINS` (email domain or Google `hd`).
+- **Roles from the IdP:** with a role claim configured (Okta `groups`, Auth0 namespaced claim) the IdP is authoritative
+  and the most privileged mapped role wins (admin > pm_tech_lead > cs_lead > viewer); without one (Google) roles are
+  managed in FeatureLedger and new users start as `OIDC_DEFAULT_ROLE`. `BOOTSTRAP_ADMIN_EMAILS` are always admin.
+- **Dev login:** `POST /api/v1/auth/dev-login {role}` only when `SANDBOX_MODE=true` (404 otherwise).
+- **Webhooks:** no session; the tenant comes from `integration_org(integration_id)` and the vendor signature is checked first.
+
+### 12.4 Authorization
+
+One matrix in `app/auth/rbac.py` (README has it as a table). Forward transitions are checked by the state the
+plan is leaving: candidate → `sunset:blast_radius` (PM/TL, admin); blast_radius_checked → `sunset:cs_signoff`
+(CS lead, admin; passing `cs_signoff: true` needs it too); customer_outreach and the promotion →
+`sunset:approve_canary` (admin); canary → PR and manual archive → `sunset:approve_cleanup` (admin). Denials are
+`403 {code: forbidden, permission, role}`. Tenant isolation stays in Postgres: the session's org sets
+`app.org_id` for the transaction and RLS (FORCE) filters every statement.
+
+### 12.5 Schema (`0006_phase4_sunset_auth.sql`)
+
+`user_role` gains `pm_tech_lead`, `cs_lead` (legacy `pm`/`eng_lead` → PM/TL, `cs` → CS lead, `finance` → viewer);
+`users` gains `name`, `oidc_issuer`, `oidc_subject`, `last_login_at`, `disabled`. New RLS tables: `flag_states`
+(desired state per flag, keep-on list, provider reference), `flag_evaluations` (hourly or daily buckets per source),
+`cleanup_pull_requests`. `sunset_plans.rollback_count`.
+
+## 13. Not built yet
 
 - Linear, Mixpanel/Amplitude, HubSpot/Salesforce, Intercom and GCP connectors (same contract as the Phase 2 five).
-- LaunchDarkly/Statsig flag toggling and evaluation counts.
-- Opening the cleanup PR through the GitHub API (outline only today).
-- OIDC/SSO, per-user roles, and KMS-backed token encryption (the columns exist; Phase 2 reads credentials from the environment).
+- GitLab merge requests for cleanup (the change builder is provider-neutral).
+- SCIM user provisioning and KMS-backed token encryption (credentials are read from the environment).

@@ -14,7 +14,7 @@ from ..connectors.ratelimit import MemoryBucketStore
 from ..connectors.registry import build, live_configured
 from ..connectors.runner import write_envelopes
 from ..db import org_tx
-from .deps import current_org, row
+from .deps import current_org, org_for, row
 
 router = APIRouter(prefix="/api/v1", tags=["integrations"])
 _arq = None
@@ -105,7 +105,7 @@ async def _integration(conn, iid: str) -> dict[str, Any]:
 
 
 @router.post("/integrations/{integration_id}/sync", status_code=202)
-async def trigger_sync(integration_id: str, org: str = Depends(current_org)):
+async def trigger_sync(integration_id: str, org: str = Depends(org_for("integrations:manage"))):
     async with org_tx(org) as conn:
         i = await _integration(conn, integration_id)
     if i["kind"] == "github":
@@ -127,7 +127,7 @@ async def dead_letters(integration_id: str, org: str = Depends(current_org)):
 
 
 @router.post("/integrations/{integration_id}/dead-letters/retry")
-async def retry_dead_letters(integration_id: str, org: str = Depends(current_org)):
+async def retry_dead_letters(integration_id: str, org: str = Depends(org_for("integrations:manage"))):
     async with org_tx(org) as conn:
         n = await conn.fetchval("""WITH x AS (UPDATE ingest_inbox SET dead_lettered_at = NULL, attempts = 0, last_error = NULL
                                     WHERE integration_id = $1 AND dead_lettered_at IS NOT NULL RETURNING 1)
@@ -176,6 +176,8 @@ async def _github_webhook(i: dict[str, Any], request: Request, body: bytes, org:
     event = h.get("x-github-event", "push")
     if event == "ping":
         return {"event": "ping", "ok": True}
+    if event == "pull_request":
+        return await _github_pull_request(json.loads(body or b"{}"), org)
     if event != "push":
         return {"event": event, "ignored": True}
     payload = json.loads(body or b"{}")
@@ -192,8 +194,39 @@ async def _github_webhook(i: dict[str, Any], request: Request, body: bytes, org:
             "results": res.results}
 
 
+async def _github_pull_request(payload: dict[str, Any], org: str) -> dict[str, Any]:
+    """Phase 4: a merged cleanup PR (head branch sunset/<feature_key>) archives its sunset plan."""
+    from ..execution.orchestrator import handle_pr_merged
+    pr = payload.get("pull_request") or {}
+    head = (pr.get("head") or {}).get("ref", "")
+    if payload.get("action") != "closed" or not head.startswith("sunset/"):
+        return {"event": "pull_request", "ignored": True, "reason": "not a closed sunset/* PR"}
+    repo = (payload.get("repository") or {}).get("full_name") or ""
+    number = int(payload.get("number") or pr.get("number") or 0)
+    async with org_tx(org) as conn:
+        if not pr.get("merged"):
+            # closed without merging: the plan stays in dead_code_pr_opened until someone rolls back or reopens
+            await conn.execute("""UPDATE cleanup_pull_requests SET state = 'closed'
+                                   WHERE repo = $1 AND number = $2 AND state = 'open'""", repo, number)
+            return {"event": "pull_request", "closed_unmerged": True, "repo": repo, "number": number}
+        out = await handle_pr_merged(conn, org, repo, number, pr.get("merge_commit_sha"), pr.get("merged_at"))
+    if out.get("archived"):
+        try:
+            q = await _queue()
+            await q.enqueue_job("graph_job", org, "sunset_archived", _job_id=f"graph:{org}")
+        except HTTPException:
+            pass   # the hourly graph job recomputes anyway
+    return {"event": "pull_request", **out}
+
+
 @router.post("/webhooks/{kind}/{integration_id}", status_code=202)
-async def webhook(kind: str, integration_id: str, request: Request, org: str = Depends(current_org)):
+async def webhook(kind: str, integration_id: str, request: Request):
+    """No user session here: the tenant is resolved from the integration id, then the vendor signature
+    (or, in SANDBOX_MODE, the shared sandbox secret) is verified before anything is read."""
+    from ..db import integration_org
+    org = await integration_org(integration_id)
+    if not org:
+        raise HTTPException(404, "integration not found")
     body = await request.body()
     async with org_tx(org) as conn:
         i = await _integration(conn, integration_id)

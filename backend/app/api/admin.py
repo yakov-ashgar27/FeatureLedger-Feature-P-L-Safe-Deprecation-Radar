@@ -5,20 +5,21 @@ import logging
 from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from ..auth.session import Principal, require
 from ..config import config
 from ..core.manifest import ManifestError, parse_manifest
 from ..db import org_tx
 from ..jobs.compute_pnl import recompute
-from .deps import current_org, row
+from .deps import current_org, org_for, row
 
 router = APIRouter(prefix="/api/v1", tags=["admin"])
 log = logging.getLogger("featureledger.api")
 
 
 @router.post("/manifest/validate")
-async def validate_manifest(request: Request):
+async def validate_manifest(request: Request, org: str = Depends(current_org)):
     """Body: the raw features.yaml (any content type)."""
     text = (await request.body()).decode("utf-8", errors="replace")
     try:
@@ -31,7 +32,7 @@ async def validate_manifest(request: Request):
 
 
 @router.post("/jobs/compute-pnl")
-async def compute(org: str = Depends(current_org)):
+async def compute(org: str = Depends(org_for("pnl:recompute"))):
     async with org_tx(org) as conn:
         return await recompute(conn, org)
 
@@ -42,7 +43,7 @@ class GitHubSyncIn(BaseModel):
 
 
 @router.post("/integrations/github/sync", status_code=202)
-async def github_sync(body: GitHubSyncIn, tasks: BackgroundTasks, org: str = Depends(current_org)):
+async def github_sync(body: GitHubSyncIn, tasks: BackgroundTasks, org: str = Depends(org_for("integrations:manage"))):
     if not config.github_token:
         raise HTTPException(412, "set GITHUB_TOKEN (read-only: contents + pull requests) to enable GitHub sync")
     if body.repo.count("/") != 1:
@@ -85,3 +86,34 @@ async def github_sync(body: GitHubSyncIn, tasks: BackgroundTasks, org: str = Dep
 async def settings(org: str = Depends(current_org)):
     async with org_tx(org) as conn:
         return row(await conn.fetchrow("SELECT * FROM org_settings"))
+
+
+class SettingsIn(BaseModel):
+    """org_settings an admin may change. Omitted fields stay as they are."""
+    eng_hourly_rate_usd: float | None = Field(None, gt=0, le=2000)
+    support_hourly_rate_usd: float | None = Field(None, gt=0, le=2000)
+    hours_per_engineer_month: float | None = Field(None, ge=40, le=220)
+    allocatable_fraction: float | None = Field(None, ge=0.1, le=1)
+    calibration_clamp_max: float | None = Field(None, ge=1, le=20)
+    default_attribution_model: Literal["usage_weighted", "tier_gated", "critical_dependency"] | None = None
+    critical_concentration: float | None = Field(None, ge=0.05, le=1)
+    anchor_min_arr_usd: float | None = Field(None, ge=0)
+    mapping_auto_confirm: float | None = Field(None, ge=0.5, le=1)
+    min_team_size_for_display: int | None = Field(None, ge=1, le=50)
+
+
+@router.put("/settings")
+async def update_settings(body: SettingsIn, recompute_pnl: bool = True, who: Principal = Depends(require("settings:write"))):
+    from decimal import Decimal
+    changes = {k: Decimal(str(v)) if isinstance(v, float) else v for k, v in body.model_dump(exclude_none=True).items()}
+    if not changes:
+        raise HTTPException(422, "nothing to change")
+    sets = ", ".join(f"{k} = ${i + 1}" for i, k in enumerate(changes))
+    async with org_tx(who.org_id) as conn:
+        before = row(await conn.fetchrow("SELECT * FROM org_settings"))
+        await conn.execute(f"UPDATE org_settings SET {sets}, updated_at = now()", *changes.values())
+        after = row(await conn.fetchrow("SELECT * FROM org_settings"))
+        log.info("org_settings changed by %s (%s): %s", who.email, who.role.value,
+                 {k: (before[k], after[k]) for k in changes})
+        pnl = await recompute(conn, who.org_id) if recompute_pnl else None
+    return {"settings": after, "changed": sorted(changes), "pnl": pnl}

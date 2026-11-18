@@ -2,7 +2,7 @@ import Link from "next/link";
 import { CostTrend } from "@/components/CostTrend";
 import { StartSunset } from "@/components/StartSunset";
 import { ClassBadge, ErrorBox, Kpi, SectionTitle } from "@/components/ui";
-import { apiGet } from "@/lib/api";
+import { serverLoad } from "@/lib/server";
 import { num, pct, STATE_LABEL, usd, usdShort } from "@/lib/format";
 import type { TearSheet } from "@/lib/types";
 
@@ -10,12 +10,9 @@ export const dynamic = "force-dynamic";
 
 export default async function FeaturePage({ params }: { params: Promise<{ key: string }> }) {
   const { key } = await params;
-  let d: TearSheet;
-  try {
-    d = await apiGet<TearSheet>(`/api/v1/features/${encodeURIComponent(key)}`);
-  } catch (e) {
-    return <ErrorBox error={(e as Error).message} />;
-  }
+  const res = await serverLoad<TearSheet>(`/api/v1/features/${encodeURIComponent(key)}`, `/features/${key}`);
+  if (res.error !== null) return <ErrorBox error={res.error} />;
+  const d = res.data;
   const f = d.feature;
   const cur = d.history[d.history.length - 1];
   const first = d.history[0];

@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { NEEDS, useCan } from "@/components/Auth";
 import { apiPost } from "@/lib/api";
 
 export function StartSunset({ featureKey, defaultReason }: { featureKey: string; defaultReason: string }) {
@@ -11,7 +12,11 @@ export function StartSunset({ featureKey, defaultReason }: { featureKey: string;
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  if (!open) return <button className="btn-primary" onClick={() => setOpen(true)}>Start safe sunset</button>;
+  const can = useCan()("sunset:create");
+  if (!open) return (
+    <button className="btn-primary" disabled={!can} title={can ? undefined : `Requires ${NEEDS["sunset:create"]}`}
+      onClick={() => setOpen(true)}>Start safe sunset</button>
+  );
   return (
     <div className="card w-[420px] p-4">
       <div className="label mb-2">Why sunset this feature?</div>

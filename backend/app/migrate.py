@@ -54,6 +54,10 @@ async def provision_app_role(conn: asyncpg.Connection) -> None:
         GRANT EXECUTE ON FUNCTION resolve_org_slug(text) TO {APP_ROLE};
         GRANT EXECUTE ON FUNCTION list_sync_targets() TO {APP_ROLE};
         GRANT EXECUTE ON FUNCTION list_orgs() TO {APP_ROLE};
+        GRANT EXECUTE ON FUNCTION auth_get_user(uuid) TO {APP_ROLE};
+        GRANT EXECUTE ON FUNCTION auth_dev_user(text, text, text) TO {APP_ROLE};
+        GRANT EXECUTE ON FUNCTION auth_upsert_user(text, text, text, text, text, text, boolean) TO {APP_ROLE};
+        GRANT EXECUTE ON FUNCTION integration_org(uuid) TO {APP_ROLE};
         REVOKE UPDATE, DELETE ON sunset_audit_logs FROM {APP_ROLE};
         REVOKE INSERT, UPDATE, DELETE ON schema_migrations FROM {APP_ROLE};
         ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {APP_ROLE};

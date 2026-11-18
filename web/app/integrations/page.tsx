@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Gated } from "@/components/Auth";
 import { ErrorBox, SectionTitle } from "@/components/ui";
 import { apiGet, apiPost } from "@/lib/api";
 import { num } from "@/lib/format";
@@ -127,7 +128,7 @@ export default function IntegrationsPage() {
                   <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${h.text}`}>
                     <span className={`h-2 w-2 rounded-full ${h.dot}`} />{h.label}
                   </span>
-                  {i.kind !== "github" && <button className="btn" onClick={() => trigger(i)} disabled={i.health === "syncing"}>Trigger sync</button>}
+                  {i.kind !== "github" && <Gated perm="integrations:manage" onClick={() => trigger(i)} disabled={i.health === "syncing"}>Trigger sync</Gated>}
                 </div>
               </div>
 
@@ -201,7 +202,7 @@ export default function IntegrationsPage() {
                           <b>{d.entity_type}</b> {d.external_id} · {d.attempts} attempts · {d.last_error}
                         </div>
                       ))}
-                      <button className="btn mt-1" onClick={() => retryDead(i)}>Retry all</button>
+                      <Gated perm="integrations:manage" className="btn mt-1" onClick={() => retryDead(i)}>Retry all</Gated>
                     </div>
                   )}
                 </div>

@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
+import { Gated, ROLE_LABEL, useCan, useMe } from "@/components/Auth";
 import { ErrorBox, SectionTitle } from "@/components/ui";
 import { apiGet, apiPost } from "@/lib/api";
 import { pct, STATE_LABEL, usd, usdShort } from "@/lib/format";
-import type { SunsetPlan, SunsetState } from "@/lib/types";
+import type { FlagStatus, Role, SunsetPlan, SunsetState } from "@/lib/types";
 
 const COLUMNS: SunsetState[] = ["candidate_for_sunset", "blast_radius_checked", "customer_outreach",
   "canary_dark_launch", "dead_code_pr_opened", "archived"];
@@ -28,7 +29,7 @@ function SunsetBoard() {
     <div className="mx-auto max-w-[1400px] space-y-6">
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Safe Sunset pipeline</h1>
-        <p className="text-sm text-ink-3">Each step is gated by evidence. The feature flag stays as the rollback lever until the dead code is merged.</p>
+        <p className="text-sm text-ink-3">Each step is gated by evidence and by role. FeatureLedger drives the live feature flag through the canary, opens the cleanup PR itself, and archives the feature when that PR is merged. Rollback turns the flag fully on again.</p>
       </header>
       {err && <ErrorBox error={err} />}
       <div className="grid grid-cols-6 gap-3">
@@ -42,6 +43,8 @@ function SunsetBoard() {
                   <div className="truncate text-sm font-medium">{p.feature_name}</div>
                   <div className="mt-1 text-xs text-ink-3">{p.days_in_state} d in step{p.canary_phase ? ` · ${p.canary_phase.replace(/_/g, " ")}` : ""}</div>
                   {p.metrics && <div className="num mt-1 text-xs text-ink-2">{usdShort(p.metrics.c_total)}/mo · {Math.round(p.metrics.eng_hours)} h</div>}
+                  {p.flag && p.flag.state !== "fully_on" && <div className="mt-1"><FlagPill flag={p.flag} /></div>}
+                  {p.pull_request && <div className="mt-1 text-xs text-ink-2">PR #{p.pull_request.number} · {p.pull_request.state}</div>}
                 </button>
               ))}
             </div>
@@ -61,7 +64,8 @@ function PlanDetail({ id, onChange }: { id: string; onChange: () => void }) {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [csSignoff, setCsSignoff] = useState(false);
-  const [prMerged, setPrMerged] = useState(false);
+  const can = useCan();
+  const me = useMe();
   const [openEmail, setOpenEmail] = useState<string | null>(null);
 
   const load = useCallback(() => apiGet<SunsetPlan>(`/api/v1/sunset-plans/${id}`).then(setP).catch((e) => setErr(e.message)), [id]);
@@ -95,25 +99,87 @@ function PlanDetail({ id, onChange }: { id: string; onChange: () => void }) {
       {err && <div className="mb-4"><ErrorBox error={err} /></div>}
 
       {!terminal && (
-        <div className="mb-6 flex flex-wrap items-center gap-2">
-          <button className="btn" disabled={busy} onClick={() => act(() => apiPost(`/api/v1/sunset-plans/${id}/evidence/blast_radius`))}>1 · Compute blast radius</button>
-          <button className="btn" disabled={busy || !p.blast_radius} onClick={() => act(() => apiPost(`/api/v1/sunset-plans/${id}/acknowledge`, { kind: "inbound", ids: ["*"] }))}>Acknowledge call sites</button>
-          <button className="btn" disabled={busy} onClick={() => act(() => apiPost(`/api/v1/sunset-plans/${id}/evidence/impact_dossier`))}>2 · Build account dossier</button>
-          <button className="btn" disabled={busy || !p.impact_dossier} onClick={() => act(() => apiPost(`/api/v1/sunset-plans/${id}/acknowledge`, { kind: "account", ids: ["*"] }))}>Mark accounts contacted</button>
-          <button className="btn" disabled={busy} onClick={() => act(() => apiPost(`/api/v1/sunset-plans/${id}/evidence/cleanup_pr`))}>4 · Draft cleanup PR</button>
-          <span className="mx-2 h-5 w-px bg-rule" />
-          <label className="flex items-center gap-1.5 text-xs text-ink-2"><input type="checkbox" checked={csSignoff} onChange={(e) => setCsSignoff(e.target.checked)} className="accent-black" />CS sign-off</label>
-          <label className="flex items-center gap-1.5 text-xs text-ink-2"><input type="checkbox" checked={prMerged} onChange={(e) => setPrMerged(e.target.checked)} className="accent-black" />PR merged</label>
-          <button className="btn-primary" disabled={busy}
-            onClick={() => act(() => apiPost(`/api/v1/sunset-plans/${id}/advance`, { expected_version: p.version, cs_signoff: csSignoff, pr_merged: prMerged }))}>
-            {p.state === "canary_dark_launch" && p.canary_phase === "zero_usage_off" ? "Turn flag fully off" : "Advance →"}
-          </button>
-          {(p.state === "canary_dark_launch" || p.state === "dead_code_pr_opened") && (
-            <button className="btn" disabled={busy} onClick={() => act(() => apiPost(`/api/v1/sunset-plans/${id}/rollback`, { reason: "Manual rollback from dashboard" }))}>Roll back (flag on)</button>
-          )}
-          <button className="btn" disabled={busy} onClick={() => act(() => apiPost(`/api/v1/sunset-plans/${id}/cancel`, { reason: "Cancelled from dashboard" }))}>Cancel plan</button>
+        <div className="mb-6 space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Gated perm="sunset:blast_radius" disabled={busy || step > 0} onClick={() => act(() => apiPost(`/api/v1/sunset-plans/${id}/evidence/blast_radius`))}>1 · Compute blast radius</Gated>
+            <Gated perm="sunset:blast_radius" disabled={busy || !p.blast_radius || step > 0} onClick={() => act(() => apiPost(`/api/v1/sunset-plans/${id}/acknowledge`, { kind: "inbound", ids: ["*"] }))}>Acknowledge call sites</Gated>
+            <Gated perm="sunset:dossier" disabled={busy || step > 1} onClick={() => act(() => apiPost(`/api/v1/sunset-plans/${id}/evidence/impact_dossier`))}>2 · Build account dossier</Gated>
+            <Gated perm="sunset:cs_signoff" disabled={busy || !p.impact_dossier || step > 2} onClick={() => act(() => apiPost(`/api/v1/sunset-plans/${id}/acknowledge`, { kind: "account", ids: ["*"] }))}>Mark accounts contacted</Gated>
+            {p.state === "blast_radius_checked" && (
+              <label className="flex items-center gap-1.5 text-xs text-ink-2" title={can("sunset:cs_signoff") ? "" : "Requires CS lead or Admin"}>
+                <input type="checkbox" checked={csSignoff} disabled={!can("sunset:cs_signoff")} onChange={(e) => setCsSignoff(e.target.checked)} className="accent-black" />CS sign-off on the dossier
+              </label>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Gated perm={advancePerm(p)} className="btn-primary" disabled={busy || p.state === "dead_code_pr_opened"}
+              onClick={() => act(() => apiPost(`/api/v1/sunset-plans/${id}/advance`, { expected_version: p.version, cs_signoff: csSignoff }))}>
+              {advanceLabel(p)}
+            </Gated>
+            {(p.state === "canary_dark_launch" || p.state === "dead_code_pr_opened") && (
+              <Gated perm="sunset:rollback" disabled={busy} onClick={() => act(() => apiPost(`/api/v1/sunset-plans/${id}/rollback`, { reason: `Rolled back from the dashboard by ${me?.email ?? "user"}` }))}>
+                Roll back: flag fully on
+              </Gated>
+            )}
+            <Gated perm="sunset:cancel" disabled={busy} onClick={() => act(() => apiPost(`/api/v1/sunset-plans/${id}/cancel`, { reason: "Cancelled from dashboard" }))}>Cancel plan</Gated>
+            {me && <span className="text-xs text-ink-3">Signed in as {ROLE_LABEL[me.role as Role]}: next step needs {ADVANCE_ROLE[advancePerm(p)]}</span>}
+          </div>
         </div>
       )}
+
+      <div className="mb-6 grid gap-4 lg:grid-cols-3">
+        <div className="card p-4">
+          <div className="label mb-2">Feature flag</div>
+          {p.flag_key ? (
+            <>
+              <div className="flex items-center justify-between gap-2"><code className="text-sm">{p.flag_key}</code><FlagPill flag={p.flag ?? { state: "fully_on", provider: null }} /></div>
+              <div className="mt-2 text-xs text-ink-3">
+                {p.flag?.provider ? `via ${p.flag.provider}` : "not yet under FeatureLedger control"}
+                {p.flag?.state === "zero_usage_off" && ` · still on for ${p.flag.keep_on_for_count ?? 0} account(s) with usage in the last 90 days`}
+                {p.flag?.last_error && <div className="mt-1 text-[#8a3413]">Last error: {p.flag.last_error}</div>}
+              </div>
+              <div className="mt-2 text-xs text-ink-2">Rollbacks: <b className="num">{p.rollback_count ?? 0}</b></div>
+            </>
+          ) : <div className="text-sm text-ink-3">No flag: a reversible dark launch is impossible. Add <code>flag_key</code> in features.yaml.</div>}
+        </div>
+        <div className="card p-4">
+          <div className="label mb-2">Scream test</div>
+          {p.scream_test ? (
+            <>
+              <div className="num text-xl font-semibold">{Math.min(p.scream_test.quiet_days, p.scream_test.required_days)} / {p.scream_test.required_days} days</div>
+              <div className="my-2 h-1.5 rounded-full bg-[#e7e6e2]"><div className="h-1.5 rounded-full bg-ink" style={{ width: `${Math.min(100, 100 * p.scream_test.quiet_days / p.scream_test.required_days)}%` }} /></div>
+              <div className="grid grid-cols-3 gap-2 text-xs">
+                <Stat label="'on' evaluations" value={p.scream_test.flag_on_evaluations} bad />
+                <Stat label="tickets" value={p.scream_test.tickets_since_off} bad />
+                <Stat label="'off' evaluations" value={p.scream_test.flag_off_evaluations} />
+              </div>
+              <div className="mt-2 text-xs text-ink-3">Fully off since {p.scream_test.fully_off_at.slice(0, 10)}. Any 'on' evaluation or ticket blocks the cleanup PR.</div>
+            </>
+          ) : <div className="text-sm text-ink-3">Starts when the flag goes fully off.</div>}
+          {can("flags:simulate") && p.state === "canary_dark_launch" && p.flag_key && (
+            <div className="mt-3 flex gap-2 border-t border-rule pt-3">
+              <button className="btn text-xs" disabled={busy} onClick={() => act(() => apiPost(`/api/v1/flags/${p.flag_key}/evaluations`, { on_count: 1, off_count: 0 }))}>Sandbox: serve 'on' once</button>
+              <button className="btn text-xs" disabled={busy} onClick={() => act(() => apiPost(`/api/v1/flags/${p.flag_key}/evaluations`, { reset: true }))}>Reset</button>
+            </div>
+          )}
+        </div>
+        <div className="card p-4">
+          <div className="label mb-2">Cleanup pull request</div>
+          {p.cleanup_pr?.number ? (
+            <>
+              <div className="text-sm font-medium">
+                {p.cleanup_pr.url ? <a href={p.cleanup_pr.url} target="_blank" rel="noreferrer" className="hover:underline">{p.cleanup_pr.repo}#{p.cleanup_pr.number} ↗</a>
+                  : <>{p.cleanup_pr.repo}#{p.cleanup_pr.number} <span className="text-xs text-ink-3">(sandbox)</span></>}
+              </div>
+              <div className="mt-1 text-xs text-ink-3">branch <code>{p.cleanup_pr.branch}</code> · <b>{p.cleanup_pr.state}</b> · {p.cleanup_pr.files_to_delete.length} files deleted</div>
+              <div className="mt-2 text-xs text-ink-2">{p.cleanup_pr.state === "open" ? "Merging it archives the feature automatically (GitHub webhook)." : p.cleanup_pr.state === "merged" ? `Merged ${p.cleanup_pr.merged_at?.slice(0, 10) ?? ""}.` : "Closed."}</div>
+              {p.cleanup_pr.state === "open" && p.cleanup_pr.provider === "sandbox" && can("flags:simulate") && (
+                <button className="btn mt-3 text-xs" disabled={busy} onClick={() => act(() => apiPost(`/api/v1/sunset-plans/${id}/cleanup-pr/simulate-merge`))}>Sandbox: merge the PR</button>
+              )}
+            </>
+          ) : <div className="text-sm text-ink-3">Opened automatically by FeatureLedger when an admin advances a quiet canary.</div>}
+        </div>
+      </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <div>
@@ -151,7 +217,7 @@ function PlanDetail({ id, onChange }: { id: string; onChange: () => void }) {
           ) : <Empty text="Not generated yet." />}
         </div>
         <div>
-          <SectionTitle title="Dead-code PR" sub="Outline to open once the scream test is quiet" />
+          <SectionTitle title="Dead-code PR" sub={p.cleanup_pr?.number ? "The body FeatureLedger opened the PR with" : "Opened automatically after a quiet scream test"} />
           {p.cleanup_pr ? (
             <div className="card p-3">
               <div className="text-sm font-medium">{p.cleanup_pr.title}</div>
@@ -165,7 +231,9 @@ function PlanDetail({ id, onChange }: { id: string; onChange: () => void }) {
           <div className="card max-h-80 divide-y divide-rule overflow-y-auto">
             {(p.audit_log ?? []).map((l) => (
               <div key={l.id} className="flex items-center justify-between gap-3 px-3 py-2 text-xs">
-                <span><span className="text-ink-3">{l.created_at.slice(0, 16).replace("T", " ")}</span> · {l.action} → {STATE_LABEL[l.to_state] ?? l.to_state}</span>
+                <span><span className="text-ink-3">{l.created_at.slice(0, 16).replace("T", " ")}</span> · {l.action.replace(/_/g, " ")} → {STATE_LABEL[l.to_state] ?? l.to_state}
+                  {l.payload.flag_state ? <> · flag <b>{String(l.payload.flag_state).replace(/_/g, " ")}</b></> : null}
+                  {l.payload.actor_role ? <span className="text-ink-3"> · {ROLE_LABEL[l.payload.actor_role as Role] ?? String(l.payload.actor_role)}</span> : null}</span>
                 <code className="text-ink-3" title={l.hash}>{l.hash.slice(0, 10)}</code>
               </div>
             ))}
@@ -173,6 +241,46 @@ function PlanDetail({ id, onChange }: { id: string; onChange: () => void }) {
         </div>
       </div>
     </section>
+  );
+}
+
+const ADVANCE_ROLE: Record<string, string> = {
+  "sunset:blast_radius": "PM / Tech lead or Admin", "sunset:cs_signoff": "CS lead or Admin",
+  "sunset:approve_canary": "Admin", "sunset:approve_cleanup": "Admin",
+};
+
+function advancePerm(p: SunsetPlan): string {
+  switch (p.state) {
+    case "candidate_for_sunset": return "sunset:blast_radius";
+    case "blast_radius_checked": return "sunset:cs_signoff";
+    case "customer_outreach": return "sunset:approve_canary";
+    case "canary_dark_launch": return p.canary_phase === "zero_usage_off" ? "sunset:approve_canary" : "sunset:approve_cleanup";
+    default: return "sunset:approve_cleanup";
+  }
+}
+
+function advanceLabel(p: SunsetPlan): string {
+  switch (p.state) {
+    case "candidate_for_sunset": return "Confirm blast radius →";
+    case "blast_radius_checked": return "Start customer outreach →";
+    case "customer_outreach": return "Approve dark launch (flag off for 0-usage accounts) →";
+    case "canary_dark_launch": return p.canary_phase === "zero_usage_off" ? "Turn flag fully off (start scream test) →" : "Approve cleanup PR →";
+    case "dead_code_pr_opened": return "Waiting for the PR merge";
+    default: return "Advance →";
+  }
+}
+
+function FlagPill({ flag }: { flag: FlagStatus }) {
+  const tone = flag.state === "fully_on" ? "bg-[#e7f5ee] text-[#126b4a]" : flag.state === "fully_off" ? "bg-[#fdf3ee] text-[#8a3413]" : "bg-[#fff6e0] text-[#7a5300]";
+  return <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-medium ${tone}`}>flag {flag.state.replace(/_/g, " ")}</span>;
+}
+
+function Stat({ label, value, bad }: { label: string; value: number; bad?: boolean }) {
+  return (
+    <div>
+      <div className={`num text-base font-semibold ${bad && value > 0 ? "text-[#b4471c]" : ""}`}>{value.toLocaleString()}</div>
+      <div className="text-ink-3">{label}</div>
+    </div>
   );
 }
 

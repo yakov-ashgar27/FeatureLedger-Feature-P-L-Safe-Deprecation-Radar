@@ -433,10 +433,8 @@ def _to_sql(org_id, manifest, teams, features, accounts, csm, usage, act, wi_row
                     f"SELECT set_config('app.org_id', '{org_id}', true);"]
     s += _insert("organizations", ["id", "name", "slug"], [[org_id, "Northwind Cloud", ORG_SLUG]])
     s += _insert("org_settings", ["org_id"], [[org_id]])
-    s += _insert("users", ["id", "org_id", "email", "role"], [
-        [uid("user", e), org_id, e, r] for e, r in [("admin@northwind.io", "admin"), ("cfo@northwind.io", "finance"),
-                                                    ("pm.lead@northwind.io", "pm"), ("eng.lead@northwind.io", "eng_lead"),
-                                                    ("dana@northwind.io", "cs")]])
+    s += _insert("users", ["id", "org_id", "email", "name", "role"], [
+        [uid("user", e), org_id, e, n, r] for e, n, r in SEED_USERS])
     s += _insert("teams", ["id", "org_id", "key", "name", "headcount"],
                  [[t.id, org_id, t.key, t.name, t.headcount] for t in teams])
     gh = uid("integration", "github")
@@ -527,28 +525,61 @@ def _connector_facts(org_id, accounts, csm, usage, act, ticket_rows, suggestions
     return s
 
 
+# Phase 4 roles (see app/auth/rbac.py). The dev login in SANDBOX_MODE signs in as one of these.
+SEED_USERS = [("admin@northwind.io", "Avery Admin", "admin"),
+              ("pm.lead@northwind.io", "Priya PM", "pm_tech_lead"),
+              ("eng.lead@northwind.io", "Theo Tech Lead", "pm_tech_lead"),
+              ("dana@northwind.io", "Dana CS", "cs_lead"),
+              ("cfo@northwind.io", "Vic Viewer", "viewer")]
+
+# The zapier plan went fully_off after the last seeded ticket (Oct 28) and its 14-day scream test is
+# over by the demo date (2026-11-18), so it can be advanced to an automated cleanup PR right away.
+ZAPIER_FULLY_OFF_AT = datetime(2026, 10, 29, 0, 0, tzinfo=timezone.utc)
+ZAPIER_SCREAM_DAYS = 14
+
+
 def _sunset_seed(org_id: str, fid: dict[str, str]) -> list[str]:
     """Two plans already in flight so the pipeline board is not empty on first run."""
     zap = uid("plan", "zapier-v1-webhooks")
     csv = uid("plan", "bulk-csv-import-v1")
     admin = uid("user", "admin@northwind.io")
+    pm = uid("user", "pm.lead@northwind.io")
+    cs = uid("user", "dana@northwind.io")
     now = datetime(2026, 11, 18, 9, 0, tzinfo=timezone.utc)
-    canary = {"phase": "fully_off", "started_at": (now - timedelta(days=19)).isoformat(),
-              "fully_off_at": (now - timedelta(days=12)).isoformat(), "rollbacks": 0}
+    started = ZAPIER_FULLY_OFF_AT - timedelta(days=7)
+    canary = {"phase": "fully_off", "started_at": started.isoformat(), "fully_off_at": ZAPIER_FULLY_OFF_AT.isoformat(),
+              "rollbacks": 0, "keep_on_for_count": 0, "provider": "sandbox"}
     out = _insert("sunset_plans", ["id", "org_id", "feature_id", "state", "canary_phase", "reason", "canary",
-                                   "created_by", "state_entered_at", "created_at"], [
+                                   "scream_test_days", "created_by", "state_entered_at", "created_at"], [
         [zap, org_id, fid["zapier-v1-webhooks"], "canary_dark_launch", "fully_off",
-         "Superseded by Zapier v2 app; 55% bug share", json.dumps(canary), admin, now - timedelta(days=19),
-         now - timedelta(days=40)],
+         "Superseded by Zapier v2 app; 55% bug share", json.dumps(canary), ZAPIER_SCREAM_DAYS, pm,
+         ZAPIER_FULLY_OFF_AT, now - timedelta(days=40)],
         [csv, org_id, fid["bulk-csv-import-v1"], "blast_radius_checked", None,
-         "Replaced by the v2 importer in 2024", None, admin, now - timedelta(days=3), now - timedelta(days=6)]])
-    steps = [(zap, None, "candidate_for_sunset", 40), (zap, "candidate_for_sunset", "blast_radius_checked", 36),
-             (zap, "blast_radius_checked", "customer_outreach", 34), (zap, "customer_outreach", "canary_dark_launch", 19),
-             (csv, None, "candidate_for_sunset", 6), (csv, "candidate_for_sunset", "blast_radius_checked", 3)]
-    for plan, frm, to, ago in steps:
+         "Replaced by the v2 importer in 2024", None, 30, pm, now - timedelta(days=3), now - timedelta(days=6)]])
+    steps = [(zap, None, "candidate_for_sunset", "transition", pm, now - timedelta(days=40)),
+             (zap, "candidate_for_sunset", "blast_radius_checked", "transition", pm, now - timedelta(days=36)),
+             (zap, "blast_radius_checked", "customer_outreach", "transition", cs, now - timedelta(days=34)),
+             (zap, "customer_outreach", "canary_dark_launch", "transition", admin, started),
+             (zap, "canary_dark_launch", "canary_dark_launch", "canary_promote", admin, ZAPIER_FULLY_OFF_AT),
+             (csv, None, "candidate_for_sunset", "transition", pm, now - timedelta(days=6)),
+             (csv, "candidate_for_sunset", "blast_radius_checked", "transition", pm, now - timedelta(days=3))]
+    roles = {admin: ("admin@northwind.io", "admin"), pm: ("pm.lead@northwind.io", "pm_tech_lead"),
+             cs: ("dana@northwind.io", "cs_lead")}
+    for plan, frm, to, action, actor, at in steps:
+        payload = {"flag_state": "fully_off" if action == "canary_promote" else
+                   "zero_usage_off" if to == "canary_dark_launch" else None,
+                   "actor": roles[actor][0], "actor_role": roles[actor][1], "actor_kind": "user"}
         out += _insert("sunset_audit_logs", ["org_id", "plan_id", "from_state", "to_state", "action", "actor_id",
                                              "payload", "created_at"],
-                       [[org_id, plan, frm, to, "transition", admin, "{}", now - timedelta(days=ago)]])
+                       [[org_id, plan, frm, to, action, actor,
+                         json.dumps({k: v for k, v in payload.items() if v}), at]])
+    out += _insert("flag_states", ["org_id", "flag_key", "provider", "state", "plan_id", "updated_by", "updated_at"],
+                   [[org_id, "zapier-v1", "sandbox", "fully_off", zap, admin, ZAPIER_FULLY_OFF_AT]])
+    # daily evaluation counts since the flag went fully off: traffic still asks, every answer is 'off'
+    rng = random.Random(11)
+    out += _insert("flag_evaluations", ["org_id", "flag_key", "bucket_start", "source", "on_count", "off_count"],
+                   [[org_id, "zapier-v1", ZAPIER_FULLY_OFF_AT + timedelta(days=d), "sandbox", 0, rng.randint(40, 90)]
+                    for d in range((now - ZAPIER_FULLY_OFF_AT).days)])
     return out
 
 

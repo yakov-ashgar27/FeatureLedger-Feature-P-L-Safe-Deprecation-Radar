@@ -17,13 +17,22 @@ jobs:
       - run: pip install -r backend/requirements.txt
       - name: unit + engine tests
         run: cd backend && python -m pytest
-      - name: migrate, seed and compute against real Postgres
+      - name: migrate, seed (full data set) and compute against real Postgres
         env:
           ADMIN_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/featureledger
+          SANDBOX_MODE: "false"
         run: cd backend && python -m app.migrate
       - name: RLS blocks reads without a tenant
         run: |
           test "$(PGPASSWORD=app_dev_password psql -h localhost -U featureledger_app -d featureledger -tAc 'select count(*) from features')" = "0"
+          test "$(PGPASSWORD=app_dev_password psql -h localhost -U featureledger_app -d featureledger -tAc 'select count(*) from flag_states')" = "0"
+      - name: "Phase 4 over HTTP: auth, RBAC x 4 roles, tenant isolation, scream guards, cleanup PR + merge, rollback"
+        env:
+          FL_INTEGRATION: "1"
+          SANDBOX_MODE: "true"
+          DATABASE_URL: postgresql://featureledger_app:app_dev_password@localhost:5432/featureledger
+          ADMIN_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/featureledger
+        run: cd backend && python -m pytest tests/test_phase4_api.py -v
 
   web:
     runs-on: ubuntu-latest
@@ -45,10 +54,17 @@ jobs:
         run: |
           for i in $(seq 1 90); do curl -fs http://localhost:3000 >/dev/null && exit 0; sleep 5; done
           docker compose ps; docker compose logs api web; exit 1
+      - name: "Phase 4: sign in (dev login, SANDBOX_MODE) for each role"
+        run: |
+          for r in admin pm_tech_lead cs_lead viewer; do
+            t=$(curl -fs -X POST http://localhost:8000/api/v1/auth/dev-login -H "Content-Type: application/json" -d "{\"role\":\"$r\"}" | python3 -c "import json,sys; print(json.load(sys.stdin)['token'])")
+            echo "TOKEN_$(echo $r | tr a-z A-Z)=$t" >> "$GITHUB_ENV"
+          done
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/api/v1/pnl)" = "401"
       - name: worker syncs the five sandbox connectors and the ledger fills in
         run: |
           for i in $(seq 1 90); do
-            z=$(curl -fs "http://localhost:8000/api/v1/pnl?window=3" | python3 -c "import json,sys; d=json.load(sys.stdin); print(','.join(f['key'] for f in d['features'] if f['classification']=='zombie'))" || true)
+            z=$(curl -fs -H "Authorization: Bearer $TOKEN_ADMIN" "http://localhost:8000/api/v1/pnl?window=3" | python3 -c "import json,sys; d=json.load(sys.stdin); print(','.join(f['key'] for f in d['features'] if f['classification']=='zombie'))" || true)
             echo "attempt $i zombies=[$z]"
             case "$z" in *legacy-pdf-export*) break;; esac
             sleep 5
@@ -56,7 +72,7 @@ jobs:
           case "$z" in *legacy-pdf-export*) ;; *)
             docker compose exec -T db psql -U postgres -d featureledger -c "select pid, state, wait_event_type, wait_event, now() - query_start as running_for, left(query, 300) as query from pg_stat_activity where datname = 'featureledger' and pid <> pg_backend_pid()"
             docker compose logs worker; exit 1;; esac
-          curl -fs http://localhost:8000/api/v1/integrations | python3 -c "
+          curl -fs -H "Authorization: Bearer $TOKEN_ADMIN" http://localhost:8000/api/v1/integrations | python3 -c "
           import json, sys
           d = json.load(sys.stdin)
           rows = [i for i in d['integrations'] if i['kind'] != 'github']
@@ -69,9 +85,9 @@ jobs:
           "
       - name: manual trigger and sandbox webhook
         run: |
-          IDS=$(curl -fs http://localhost:8000/api/v1/integrations)
+          IDS=$(curl -fs -H "Authorization: Bearer $TOKEN_ADMIN" http://localhost:8000/api/v1/integrations)
           STRIPE=$(echo "$IDS" | python3 -c "import json,sys; print([i['id'] for i in json.load(sys.stdin)['integrations'] if i['kind']=='stripe'][0])")
-          curl -fs -X POST "http://localhost:8000/api/v1/integrations/$STRIPE/sync"
+          curl -fs -H "Authorization: Bearer $TOKEN_ADMIN" -X POST "http://localhost:8000/api/v1/integrations/$STRIPE/sync"
           curl -fs -X POST "http://localhost:8000/api/v1/webhooks/stripe/$STRIPE" -H "X-FeatureLedger-Secret: sandbox" \
             -H "Content-Type: application/json" \
             -d '{"type":"customer.updated","data":{"object":{"object":"customer","id":"cus_ci_test","email":"x@ci-example.com","metadata":{"company_name":"CI Example","tier":"pro"}}}}'
@@ -80,7 +96,7 @@ jobs:
       - name: webhook envelope is processed, nothing pending or dead-lettered
         run: |
           for i in $(seq 1 30); do
-            out=$(curl -fs http://localhost:8000/api/v1/integrations | python3 -c "
+            out=$(curl -fs -H "Authorization: Bearer $TOKEN_ADMIN" http://localhost:8000/api/v1/integrations | python3 -c "
           import json, sys
           rows = [i for i in json.load(sys.stdin)['integrations'] if i['kind'] != 'github']
           print(sum(i['inbox']['pending'] for i in rows), sum(i['inbox']['dead_letters'] for i in rows))")
@@ -91,7 +107,7 @@ jobs:
           docker compose logs worker | tail -50; exit 1
       - name: "Phase 3: Tier 2 + Tier 3 ran, pgvector holds embeddings, no raw text or PII stored"
         run: |
-          curl -fs "http://localhost:8000/api/v1/triage?status=auto" | python3 -c "
+          curl -fs -H "Authorization: Bearer $TOKEN_ADMIN" "http://localhost:8000/api/v1/triage?status=auto" | python3 -c "
           import json, sys
           d = json.load(sys.stdin)
           tiers = {i['tier'] for i in d['items']}
@@ -99,7 +115,7 @@ jobs:
           assert {2, 3} <= tiers, 'expected auto-confirmed mappings from both tiers'
           assert all(i['confidence'] >= 0.80 for i in d['items'])
           "
-          curl -fs "http://localhost:8000/api/v1/triage?status=pending" | python3 -c "
+          curl -fs -H "Authorization: Bearer $TOKEN_ADMIN" "http://localhost:8000/api/v1/triage?status=pending" | python3 -c "
           import json, sys
           d = json.load(sys.stdin)
           assert d['items'] and all(i['confidence'] < 0.80 for i in d['items']), 'pending items must be below 0.80'
@@ -113,7 +129,7 @@ jobs:
           test "$(q "select count(*) from ingest_inbox where payload::text ilike '%jane%' or payload::text ilike '%stopped working%' or payload::text ilike '%keeps failing%'")" = "0"
       - name: "Phase 3: features.yaml push webhook (invalid is rejected and reported, valid is applied)"
         run: |
-          GH=$(curl -fs http://localhost:8000/api/v1/integrations | python3 -c "import json,sys; print([i['id'] for i in json.load(sys.stdin)['integrations'] if i['kind']=='github'][0])")
+          GH=$(curl -fs -H "Authorization: Bearer $TOKEN_ADMIN" http://localhost:8000/api/v1/integrations | python3 -c "import json,sys; print([i['id'] for i in json.load(sys.stdin)['integrations'] if i['kind']=='github'][0])")
           mk() { python3 -c "
           import json, sys
           text = open('features.yaml').read() if sys.argv[1] == 'good' else 'version: 1\nfeatures: [{key: Bad_Key, name: X}]'
@@ -124,28 +140,31 @@ jobs:
           hook() { curl -fs -X POST "http://localhost:8000/api/v1/webhooks/github/$GH" -H "X-FeatureLedger-Secret: sandbox" -H "X-GitHub-Event: push" -H "Content-Type: application/json" -d "$1"; }
           hook "$(mk bad c0ffee01)" | tee /tmp/bad.json
           python3 -c "import json; r=json.load(open('/tmp/bad.json'))['results'][0]; assert r['status']=='invalid' and r['errors'], r"
-          curl -fs http://localhost:8000/api/v1/integrations | python3 -c "
+          curl -fs -H "Authorization: Bearer $TOKEN_ADMIN" http://localhost:8000/api/v1/integrations | python3 -c "
           import json, sys
           gh = [i for i in json.load(sys.stdin)['integrations'] if i['kind'] == 'github'][0]
           print(gh['health'], gh['last_error'], gh['manifest']['status'])
           assert gh['health'] == 'failing' and gh['manifest']['status'] == 'invalid' and gh['last_error']
           "
-          curl -fs http://localhost:8000/api/v1/features/legacy-pdf-export | python3 -c "import json,sys; assert json.load(sys.stdin)['feature']['name'] == 'Legacy PDF Exporter'"
+          curl -fs -H "Authorization: Bearer $TOKEN_ADMIN" http://localhost:8000/api/v1/features/legacy-pdf-export | python3 -c "import json,sys; assert json.load(sys.stdin)['feature']['name'] == 'Legacy PDF Exporter'"
           hook "$(mk good c0ffee02)" | tee /tmp/good.json
           python3 -c "import json; r=json.load(open('/tmp/good.json'))['results'][0]; assert r['status']=='applied', r"
-          curl -fs http://localhost:8000/api/v1/features/legacy-pdf-export | python3 -c "import json,sys; n=json.load(sys.stdin)['feature']['name']; print(n); assert n == 'Legacy PDF Exporter (deprecated)'"
+          curl -fs -H "Authorization: Bearer $TOKEN_ADMIN" http://localhost:8000/api/v1/features/legacy-pdf-export | python3 -c "import json,sys; n=json.load(sys.stdin)['feature']['name']; print(n); assert n == 'Legacy PDF Exporter (deprecated)'"
       - name: "Phase 3: a human decision is applied and the graph re-runs cleanly"
         run: |
-          ID=$(curl -fs "http://localhost:8000/api/v1/triage?status=pending&tier=2" | python3 -c "import json,sys; print(json.load(sys.stdin)['items'][0]['id'])")
-          curl -fs -X POST "http://localhost:8000/api/v1/triage/$ID" -H "Content-Type: application/json" -d '{"decision":"confirm"}'
-          curl -fs -X POST "http://localhost:8000/api/v1/graph/run" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['tier2'], d['protected_human']); assert d['pnl']['features'] > 0"
-          curl -fs "http://localhost:8000/api/v1/triage?status=decided" | python3 -c "import json,sys; assert len(json.load(sys.stdin)['items']) == 1"
-      - name: dashboard pages render through the proxy
+          ID=$(curl -fs -H "Authorization: Bearer $TOKEN_ADMIN" "http://localhost:8000/api/v1/triage?status=pending&tier=2" | python3 -c "import json,sys; print(json.load(sys.stdin)['items'][0]['id'])")
+          curl -fs -H "Authorization: Bearer $TOKEN_ADMIN" -X POST "http://localhost:8000/api/v1/triage/$ID" -H "Content-Type: application/json" -d '{"decision":"confirm"}'
+          curl -fs -H "Authorization: Bearer $TOKEN_ADMIN" -X POST "http://localhost:8000/api/v1/graph/run" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['tier2'], d['protected_human']); assert d['pnl']['features'] > 0"
+          curl -fs -H "Authorization: Bearer $TOKEN_ADMIN" "http://localhost:8000/api/v1/triage?status=decided" | python3 -c "import json,sys; assert len(json.load(sys.stdin)['items']) == 1"
+      - name: dashboard pages render through the proxy (signed in)
         run: |
-          for p in / /features/legacy-pdf-export /simulator /sunset /mappings /integrations; do
-            curl -fs "http://localhost:3000$p" -o /dev/null && echo "ok $p"
+          for p in / /features/legacy-pdf-export /simulator /sunset /mappings /integrations /settings; do
+            curl -fs -H "Cookie: fl_session=$TOKEN_VIEWER" "http://localhost:3000$p" -o /dev/null && echo "ok $p"
           done
-          curl -fs http://localhost:3000/api/v1/periods
+          curl -fs -H "Cookie: fl_session=$TOKEN_VIEWER" http://localhost:3000/api/v1/periods
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/sunset)" = "307"
+      - name: "Phase 4 walkthrough: RBAC, live flag canary, scream guards, cleanup PR, merge webhook, rollback"
+        run: python3 scripts/e2e_phase4.py http://localhost:3000
       - if: failure()
         run: docker compose logs
       - name: worker stage timings

@@ -35,5 +35,48 @@ class Config:
     cors_origins: tuple[str, ...] = field(default_factory=lambda: tuple(
         o.strip() for o in os.environ.get("CORS_ORIGINS", "http://localhost:3000").split(",") if o.strip()))
 
+    # ---------------------------------------------------------------- Phase 4: auth
+    # the browser-facing URL of the dashboard (OIDC redirect_uri = APP_URL/api/v1/auth/oidc/callback)
+    app_url: str = field(default_factory=lambda: os.environ.get("APP_URL", "http://localhost:3000").rstrip("/"))
+    # HS256 key for session tokens. Required outside SANDBOX_MODE (see session_secret_or_die).
+    session_secret: str | None = field(default_factory=lambda: os.environ.get("SESSION_SECRET") or None)
+    session_ttl_hours: int = field(default_factory=lambda: int(os.environ.get("SESSION_TTL_HOURS", "12")))
+    # dev login: one click per role. Only ever available when SANDBOX_MODE=true.
+    dev_login: bool = field(default_factory=lambda: _bool(os.environ.get("AUTH_DEV_LOGIN"), True))
+    oidc_provider: str = field(default_factory=lambda: os.environ.get("OIDC_PROVIDER", "").strip().lower())
+    oidc_issuer: str = field(default_factory=lambda: os.environ.get("OIDC_ISSUER", "").strip())
+    oidc_client_id: str = field(default_factory=lambda: os.environ.get("OIDC_CLIENT_ID", "").strip())
+    oidc_client_secret: str | None = field(default_factory=lambda: os.environ.get("OIDC_CLIENT_SECRET") or None)
+    oidc_scopes: str = field(default_factory=lambda: os.environ.get("OIDC_SCOPES", ""))
+    oidc_role_claim: str | None = field(default_factory=lambda: os.environ.get("OIDC_ROLE_CLAIM"))
+    oidc_role_map: str = field(default_factory=lambda: os.environ.get("OIDC_ROLE_MAP", ""))
+    oidc_default_role: str = field(default_factory=lambda: os.environ.get("OIDC_DEFAULT_ROLE", "viewer"))
+    oidc_allowed_domains: tuple[str, ...] = field(default_factory=lambda: tuple(
+        d.strip().lower() for d in os.environ.get("OIDC_ALLOWED_DOMAINS", "").split(",") if d.strip()))
+    # the first admins of a fresh install: these emails are made admin when they sign in with SSO
+    bootstrap_admins: tuple[str, ...] = field(default_factory=lambda: tuple(
+        e.strip().lower() for e in os.environ.get("BOOTSTRAP_ADMIN_EMAILS", "").split(",") if e.strip()))
+
+    # ---------------------------------------------------------------- Phase 4: sunset execution
+    # sandbox | launchdarkly | statsig ; empty = launchdarkly/statsig if their keys are set, else sandbox
+    flag_provider: str = field(default_factory=lambda: os.environ.get("FLAG_PROVIDER", "").strip().lower())
+    # which account attribute flag targeting uses: external_ref (Stripe customer id) or id
+    flag_account_key: str = field(default_factory=lambda: os.environ.get("FLAG_ACCOUNT_KEY", "external_ref"))
+    # owner/name of the repo that cleanup PRs are opened against (live mode needs GITHUB_TOKEN too)
+    cleanup_repo: str | None = field(default_factory=lambda: os.environ.get("SUNSET_CLEANUP_REPO") or None)
+    cleanup_base_branch: str | None = field(default_factory=lambda: os.environ.get("SUNSET_CLEANUP_BASE") or None)
+
+    @property
+    def dev_login_enabled(self) -> bool:
+        return self.sandbox_mode and self.dev_login
+
+    @property
+    def oidc_enabled(self) -> bool:
+        return bool(self.oidc_client_id and (self.oidc_issuer or self.oidc_provider == "google"))
+
+    @property
+    def cookie_secure(self) -> bool:
+        return self.app_url.startswith("https://")
+
 
 config = Config()

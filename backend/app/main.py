@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .api import admin, graph, imports, integrations, pnl, sunset
+from .api import admin, auth, flags, graph, imports, integrations, pnl, sunset
 from .config import config
 from .db import close_pool, init_pool, org_tx
 
@@ -20,10 +20,15 @@ async def lifespan(_: FastAPI):
     await close_pool()
 
 
-app = FastAPI(title="FeatureLedger API", version="0.1.0", lifespan=lifespan,
+app = FastAPI(title="FeatureLedger API", version="0.4.0", lifespan=lifespan,
               description="Feature-level P&L and Safe Deprecation Radar")
+# The dashboard reaches the API through its own origin (Next.js rewrite), so browsers never need CORS;
+# this only serves tools on other origins that send a bearer token.
 app.add_middleware(CORSMiddleware, allow_origins=list(config.cors_origins), allow_credentials=False,
-                   allow_methods=["GET", "POST"], allow_headers=["Authorization", "Content-Type", "X-Org-Slug", "Stripe-Signature", "X-Hub-Signature", "X-Hub-Signature-256", "X-GitHub-Event"])
+                   allow_methods=["GET", "POST", "PUT", "PATCH"],
+                   allow_headers=["Authorization", "Content-Type", "X-Org-Slug", "X-FL-CSRF"])
+app.include_router(auth.router)
+app.include_router(flags.router)
 app.include_router(pnl.router)
 app.include_router(sunset.router)
 app.include_router(admin.router)

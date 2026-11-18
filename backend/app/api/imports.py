@@ -17,7 +17,7 @@ from ..db import org_tx
 from ..graph.manifest_store import active_manifest_text, record_and_apply
 from ..graph.reallocate import load_resolver, reallocate
 from ..importers.csv_import import ImportError_, parse_csv
-from .deps import current_org, parse_period
+from .deps import org_for, parse_period
 
 router = APIRouter(prefix="/api/v1", tags=["import"])
 
@@ -32,7 +32,7 @@ async def _manifest(org: str):
 
 
 @router.post("/manifest/apply")
-async def manifest_apply(org: str = Depends(current_org)):
+async def manifest_apply(org: str = Depends(org_for("manifest:sync"))):
     """Re-read features.yaml from disk: validate, record, apply (teams, features, Tier 1 mappings), re-allocate."""
     async with org_tx(org) as conn:
         res = await record_and_apply(conn, org, config.manifest_path.read_text(), source="disk", path="features.yaml")
@@ -45,7 +45,7 @@ async def manifest_apply(org: str = Depends(current_org)):
 
 @router.post("/import/{kind}")
 async def import_csv(kind: Literal["accounts", "usage", "tickets", "costs"], request: Request,
-                     period: str | None = None, org: str = Depends(current_org)):
+                     period: str | None = None, org: str = Depends(org_for("imports:write"))):
     m = await _manifest(org)
     text = (await request.body()).decode("utf-8-sig", errors="replace")
     try:

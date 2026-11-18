@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { Gated, NEEDS, useCan } from "@/components/Auth";
 import { ErrorBox, SectionTitle } from "@/components/ui";
 import { apiGet, apiPost } from "@/lib/api";
 import { num } from "@/lib/format";
@@ -63,6 +64,7 @@ export default function MappingsPage() {
     catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
   };
 
+  const canDecide = useCan()("triage:decide");
   const c = q?.counts;
   const latest = versions[0];
 
@@ -78,8 +80,8 @@ export default function MappingsPage() {
           </p>
         </div>
         <div className="flex gap-2">
-          <button className="btn" disabled={busy} onClick={runGraph}>Run inference</button>
-          <button className="btn-primary" disabled={busy} onClick={recompute}>Recompute P&L{dirty ? ` (${dirty})` : ""}</button>
+          <Gated perm="graph:run" disabled={busy} onClick={runGraph}>Run inference</Gated>
+          <Gated perm="pnl:recompute" className="btn-primary" disabled={busy} onClick={recompute}>Recompute P&L{dirty ? ` (${dirty})` : ""}</Gated>
         </div>
       </header>
 
@@ -141,7 +143,10 @@ export default function MappingsPage() {
                 : i.suggested_feature_name ? <>→ <b>{i.suggested_feature_name}</b></> : <span className="text-ink-3">no suggestion</span>}
               <Confidence value={i.confidence} threshold={q.threshold} />
             </div>
-            {view !== "decided" && (
+            {view !== "decided" && !canDecide && (
+              <span className="text-xs text-ink-3" title={`Requires ${NEEDS["triage:decide"]}`}>read-only</span>
+            )}
+            {view !== "decided" && canDecide && (
               <div className="flex items-center gap-2">
                 {view === "pending"
                   ? <button className="btn" disabled={!i.suggested_feature_key} onClick={() => decide(i, "confirm")}>Confirm</button>

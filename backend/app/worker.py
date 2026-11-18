@@ -1,4 +1,5 @@
-"""ARQ worker: scheduled syncs (every 15 minutes), manual and webhook triggers, inbox processing, P&L.
+"""ARQ worker: scheduled syncs (every 15 minutes), manual and webhook triggers, inbox processing, P&L,
+and (Phase 4) flag-evaluation ingestion for sunset canaries every 15 minutes.
 
     arq app.worker.WorkerSettings
 
@@ -77,6 +78,27 @@ async def hourly_graph(ctx: dict) -> dict:
     return {"orgs": len(orgs)}
 
 
+async def flag_evaluations_job(ctx: dict) -> dict:
+    """Phase 4: ingest flag evaluation counts for every plan in canary; raise scream alerts."""
+    from .execution.orchestrator import ExecutionError, scan_canaries
+    pool = await init_pool()
+    async with pool.acquire() as conn:
+        orgs = [str(r["org_id"]) for r in await conn.fetch("SELECT org_id FROM list_orgs()")]
+    out: dict[str, Any] = {}
+    for org in orgs:
+        try:
+            async with org_tx(org) as conn:
+                items = await scan_canaries(conn, org)
+            out[org] = [{k: i.get(k) for k in ("flag", "buckets", "flag_on_evaluations", "tickets_since_off", "alert")}
+                        for i in items]
+        except ExecutionError as e:
+            log.warning("flag evaluation ingest failed for %s: %s", org, e)
+            out[org] = {"error": str(e)}
+    if any(out.values()):
+        log.info("flag evaluations: %s", out)
+    return out
+
+
 async def schedule_due_syncs(ctx: dict) -> dict:
     due: dict[str, list[str]] = {}
     for t in await _targets():
@@ -102,7 +124,8 @@ class WorkerSettings:
                  func(process_job, keep_result=0, timeout=900, max_tries=1),
                  func(graph_job, keep_result=0, timeout=900, max_tries=1)]
     cron_jobs = [cron(schedule_due_syncs, minute={0, 15, 30, 45}, run_at_startup=True),
-                 cron(hourly_graph, minute=7)]
+                 cron(hourly_graph, minute=7),
+                 cron(flag_evaluations_job, minute={5, 20, 35, 50}, run_at_startup=True)]
     on_startup = startup
     on_shutdown = shutdown
     max_jobs = 4

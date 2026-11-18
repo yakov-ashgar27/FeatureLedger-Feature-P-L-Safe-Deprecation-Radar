@@ -55,3 +55,22 @@ async def resolve_org(slug: str) -> str | None:
     async with pool.acquire() as conn:
         v = await conn.fetchval("SELECT resolve_org_slug($1)", slug)
     return str(v) if v else None
+
+
+async def auth_call(fn: str, *args) -> dict | None:
+    """Call one of the pre-tenant SECURITY DEFINER auth functions (0006); returns one user row or None."""
+    pool = await init_pool()
+    placeholders = ", ".join(f"${i + 1}" for i in range(len(args)))
+    async with pool.acquire() as conn:
+        r = await conn.fetchrow(f"SELECT * FROM {fn}({placeholders})", *args)
+    return dict(r) if r else None
+
+
+async def integration_org(integration_id: str) -> str | None:
+    pool = await init_pool()
+    async with pool.acquire() as conn:
+        try:
+            v = await conn.fetchval("SELECT integration_org($1::uuid)", integration_id)
+        except asyncpg.DataError:
+            return None
+    return str(v) if v else None

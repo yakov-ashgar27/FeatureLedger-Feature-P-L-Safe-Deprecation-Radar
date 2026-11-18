@@ -1,33 +1,29 @@
 from __future__ import annotations
 
-import hmac
 from datetime import date
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from fastapi import Header, HTTPException
-
-from ..config import config
-from ..db import resolve_org
-
-_org_cache: dict[str, str] = {}
+from fastapi import Depends, HTTPException
 
 
-async def current_org(authorization: str | None = Header(default=None),
-                      x_org_slug: str | None = Header(default=None)) -> str:
-    """Phase 1 auth: optional static bearer token + org slug header (default org in dev)."""
-    if config.api_token:
-        supplied = (authorization or "").removeprefix("Bearer ").strip()
-        if not hmac.compare_digest(supplied, config.api_token):
-            raise HTTPException(401, "invalid or missing bearer token")
-    slug = x_org_slug or config.default_org_slug
-    if slug not in _org_cache:
-        org = await resolve_org(slug)
-        if not org:
-            raise HTTPException(404, f"unknown organization {slug!r}")
-        _org_cache[slug] = org
-    return _org_cache[slug]
+from ..auth.session import Principal, require, require_read
+
+
+async def current_org(p: Principal = Depends(require_read)) -> str:
+    """Any signed-in role may read. The tenant comes from the caller's user record (Phase 4)."""
+    return p.org_id
+
+
+def org_for(permission: str):
+    """Dependency: enforce `permission` (app/auth/rbac.py) and return the caller's org id."""
+    dep = require(permission)
+
+    async def _org(p: Principal = Depends(dep)) -> str:
+        return p.org_id
+    _org.__name__ = f"org_for_{permission.replace(':', '_')}"
+    return _org
 
 
 def parse_period(period: str | None) -> date | None:

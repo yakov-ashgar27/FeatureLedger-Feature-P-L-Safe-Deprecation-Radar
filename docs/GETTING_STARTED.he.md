@@ -75,28 +75,39 @@ docker compose up --build
 | הדשבורד | http://localhost:3000 |
 | תיעוד ה-API, שבו אפשר גם לנסות כל פעולה | http://localhost:8000/docs |
 
-### צעד 5: סיור במסכים
+### צעד 5: כניסה למערכת
+
+הדשבורד פותח קודם מסך כניסה. בדמו (`SANDBOX_MODE=true`) יש ארבעה כפתורים, אחד לכל תפקיד:
+
+| תפקיד | מה מותר לו |
+| --- | --- |
+| **Viewer** | רק לצפות: טבלת הרווח וההפסד, דפי הפיצ'רים והסימולטור |
+| **PM / Tech lead** | לאשר שיוכים במסך Feature Graph, לפתוח תהליך הסרה, לחשב ולאשר את ה-blast radius |
+| **CS lead** | לחתום על רשימת הלקוחות המושפעים ולסמן שפנו אליהם |
+| **Admin** | הכול, וגם: חיבורים, הגדרות הארגון, ואישור השלבים שמשנים דגל או פותחים PR |
+
+כפתור שאסור לתפקיד שלך מופיע אפור, ומעבר עכבר מראה איזה תפקיד צריך. יציאה: **Sign out** בפינה השמאלית התחתונה.
+מחוץ לדמו נכנסים עם SSO של החברה (חלק ג׳4).
+
+### צעד 6: סיור במסכים
 
 1. **Feature P&L**: טבלת רווח והפסד לכל פיצ'ר וגרף עלות מול ערך.
    - כל נקודה מתחת לקו המקווקו מייצגת פיצ'ר שעולה יותר ממה שהוא מכניס.
    - הכתום הוא Zombie, הירוק הוא Niche Anchor והכחול הוא Cash Cow.
-   - הכפתורים למעלה מחליפים את מודל הייחוס (Usage-weighted, Tier-gated, Revenue at risk), את התצוגה (Contribution לעלות ישירה בלבד, Fully loaded כולל תשתית משותפת) ואת חלון הזמן.
-2. **לחיצה על פיצ'ר** (למשל Legacy PDF Exporter) פותחת את דף הפיצ'ר:
-   - מגמת העלויות לאורך זמן
-   - הלקוחות המשלמים שמשתמשים בו
-   - הקבצים שמייצרים הכי הרבה באגים
-   - בפינה למעלה, הכפתור **Start safe sunset** פותח תהליך הסרה.
+   - הכפתורים למעלה מחליפים את מודל הייחוס (Usage-weighted, Tier-gated, Revenue at risk), את התצוגה ואת חלון הזמן.
+2. **לחיצה על פיצ'ר** (למשל Legacy PDF Exporter) פותחת את דף הפיצ'ר: מגמת עלויות, הלקוחות שמשתמשים בו, הקבצים עם הכי הרבה באגים, והכפתור **Start safe sunset** (רק ל-PM / Tech lead ול-Admin).
 3. **What-if simulator**: מסמנים פיצ'רים ורואים כמה שעות הנדסה וכמה כסף משתחררים, ואילו לקוחות בסיכון.
 4. **Safe Sunset**: לוח של כל תהליכי ההסרה. לוחצים על כרטיס ועוברים על השלבים לפי הסדר:
-   1. **Compute blast radius**: איזה קוד אחר עדיין מייבא את הפיצ'ר.
-   2. **Acknowledge call sites**: מאשרים שבעלי הקוד יודעים.
-   3. **Build account dossier**: רשימת הלקוחות שמשתמשים בפיצ'ר, עם טיוטת מייל לכל אחד. לוחצים על שם לקוח כדי לראות את הטיוטה.
-   4. אם יש לקוח בסיכון גבוה, מסמנים **CS sign-off**, ואז **Advance**.
-   5. **Mark accounts contacted** ואז **Advance**: הדגל נכבה ללקוחות שלא משתמשים בפיצ'ר.
-   6. **Turn flag fully off**: מתחילה תקופת "מבחן צעקות" של 30 יום. בכל רגע אפשר ללחוץ **Roll back**.
-   7. אחרי 30 יום שקטים: **Draft cleanup PR** ואז **Advance**.
-   8. אחרי שה-PR מוזג: מסמנים **PR merged** ואז **Advance**, והפיצ'ר עובר לארכיון.
+   1. **PM / Tech lead:** *Compute blast radius*, *Acknowledge call sites*, *Confirm blast radius*, ואז *Build account dossier*.
+   2. **CS lead:** *Mark accounts contacted*, מסמנים *CS sign-off*, ואז *Start customer outreach*.
+   3. **Admin:** *Approve dark launch*. המערכת כבתה את הדגל לכל לקוח שלא השתמש בפיצ'ר ב-90 הימים האחרונים (כרטיס *Feature flag* מראה כמה לקוחות עוד רואים אותו).
+   4. **Admin:** *Turn flag fully off*. מתחיל "מבחן צעקות" (ברירת מחדל 30 יום). ניסיון להתקדם לפני הזמן מחזיר שגיאה *scream_test_running*.
+   5. אם לקוח צועק: **Roll back** (כל תפקיד חוץ מ-Viewer). הדגל חוזר לפעול לכולם, התהליך חוזר לשלב הפנייה ללקוחות, והמונה *Rollbacks* עולה ב-1.
+   6. אחרי מבחן שקט (אפס הפעלות 'on' ואפס טיקטים): **Admin** לוחץ *Approve cleanup PR*. המערכת פותחת בעצמה PR ב-GitHub על ענף `sunset/<שם הפיצ'ר>` שמוחק את הקוד ומסיר את הפיצ'ר מ-features.yaml.
+   7. כשה-PR ממוזג ב-GitHub, הפיצ'ר עובר לארכיון לבד. בדמו לוחצים *Sandbox: merge the PR*.
+   - לניסוי מהיר: התהליך של *Zapier v1 Webhooks* כבר עבר את מבחן הצעקות. Admin יכול ללחוץ *Sandbox: serve 'on' once* ולראות שהמערכת חוסמת (*flag_still_served*), ואז *Reset* ו-*Approve cleanup PR*.
 5. **Feature Graph**: תור של שיוכים שהמערכת לא בטוחה בהם (פחות מ-80% ביטחון). לכל שורה בוחרים Confirm, Reassign או Reject. בסוף לוחצים **Recompute P&L**.
+6. **Settings & access**: תעריפים וספים (רק Admin יכול לשנות), משתמשים ותפקידים, טבלת ההרשאות המלאה, ומצב כל דגל.
 
 ### פקודות שימושיות
 
@@ -106,10 +117,14 @@ docker compose up --build
 | צפייה בלוגים | `docker compose logs -f api` |
 | עצירה | `docker compose down` |
 | **מחיקת כל הנתונים** והתחלה מחדש | `docker compose down -v` |
+| טוקן Admin לפקודות `curl` (ולכפתור Authorize ב-http://localhost:8000/docs) | `make token` |
+| הרצת כל תרחיש ההדגמה אוטומטית (מזיז את תהליכי ההסרה של הדמו) | `make e2e` |
 
 ---
 
 ## חלק ג׳: מעבר לנתונים של החברה שלך
+
+> **חשוב: כל פקודת `curl` צריכה טוקן.** מאז Phase 4 כל קריאה ל-API דורשת כניסה. הכי פשוט: רושמים ב-`.env` שורה `FL_API_TOKEN=` עם מחרוזת סודית ארוכה (למשל הפלט של `openssl rand -hex 32`), מפעילים מחדש, ומוסיפים לכל פקודה `-H "Authorization: Bearer <המחרוזת>"`. פקודות ה-`make` (`make import`, `make pnl`, `make apply-manifest`, `make sync-github`) כבר עושות את זה לבד.
 
 ### שלב 1: הגדרת הצוותים והפיצ'רים בקובץ `features.yaml`
 
@@ -158,8 +173,8 @@ features:
 ```
 
 **ג. בדיקת תקינות לפני שממשיכים.** הפקודה זמינה כשהמערכת רצה:
-- Mac: `curl -X POST localhost:8000/api/v1/manifest/validate --data-binary @features.yaml`
-- Windows: `curl.exe -X POST localhost:8000/api/v1/manifest/validate --data-binary "@features.yaml"`
+- Mac: `curl -H "Authorization: Bearer $FL_API_TOKEN" -X POST localhost:8000/api/v1/manifest/validate --data-binary @features.yaml`
+- Windows: `curl.exe -H "Authorization: Bearer $FL_API_TOKEN" -X POST localhost:8000/api/v1/manifest/validate --data-binary "@features.yaml"`
 
 אם חוזר `"valid": true`, הקובץ תקין. אחרת מקבלים רשימת שגיאות מדויקת.
 
@@ -183,8 +198,8 @@ docker compose up --build -d
 
 הארגון שלך נוצר אוטומטית מתוך `features.yaml`.
 אם תשנה את `features.yaml` בהמשך, הרץ:
-- Mac: `curl -X POST localhost:8000/api/v1/manifest/apply`
-- Windows: `curl.exe -X POST localhost:8000/api/v1/manifest/apply`
+- Mac: `curl -H "Authorization: Bearer $FL_API_TOKEN" -X POST localhost:8000/api/v1/manifest/apply`
+- Windows: `curl.exe -H "Authorization: Bearer $FL_API_TOKEN" -X POST localhost:8000/api/v1/manifest/apply`
 
 ### שלב 3: חיבור GitHub (עלות ההנדסה)
 
@@ -214,10 +229,10 @@ docker compose up -d
 > **אזהרה:** לעולם לא מכניסים את `.env` ל-git. הוא כבר מוגדר ב-`.gitignore`.
 
 **ג. משיכת ה-PRs:**
-- Mac: `curl -X POST localhost:8000/api/v1/integrations/github/sync -H "Content-Type: application/json" -d '{"repo": "your-org/your-repo"}'`
+- Mac: `curl -H "Authorization: Bearer $FL_API_TOKEN" -X POST localhost:8000/api/v1/integrations/github/sync -H "Content-Type: application/json" -d '{"repo": "your-org/your-repo"}'`
 - Windows:
   ```
-  curl.exe -X POST localhost:8000/api/v1/integrations/github/sync -H "Content-Type: application/json" -d '{\"repo\": \"your-org/your-repo\"}'
+  curl.exe -H "Authorization: Bearer $FL_API_TOKEN" -X POST localhost:8000/api/v1/integrations/github/sync -H "Content-Type: application/json" -d '{\"repo\": \"your-org/your-repo\"}'
   ```
 
 הסנכרון רץ ברקע. כדי לעקוב: `docker compose logs -f api`. מחכים לשורה `github sync ... merged`.
@@ -244,11 +259,11 @@ docker compose up -d
 
 Mac:
 ```
-curl -X POST "localhost:8000/api/v1/import/accounts?period=2026-10" --data-binary @accounts.csv
-curl -X POST "localhost:8000/api/v1/import/usage?period=2026-10"    --data-binary @usage.csv
-curl -X POST "localhost:8000/api/v1/import/tickets"                 --data-binary @tickets.csv
-curl -X POST "localhost:8000/api/v1/import/costs?period=2026-10"    --data-binary @costs.csv
-curl -X POST localhost:8000/api/v1/jobs/compute-pnl
+curl -H "Authorization: Bearer $FL_API_TOKEN" -X POST "localhost:8000/api/v1/import/accounts?period=2026-10" --data-binary @accounts.csv
+curl -H "Authorization: Bearer $FL_API_TOKEN" -X POST "localhost:8000/api/v1/import/usage?period=2026-10"    --data-binary @usage.csv
+curl -H "Authorization: Bearer $FL_API_TOKEN" -X POST "localhost:8000/api/v1/import/tickets"                 --data-binary @tickets.csv
+curl -H "Authorization: Bearer $FL_API_TOKEN" -X POST "localhost:8000/api/v1/import/costs?period=2026-10"    --data-binary @costs.csv
+curl -H "Authorization: Bearer $FL_API_TOKEN" -X POST localhost:8000/api/v1/jobs/compute-pnl
 ```
 
 Windows: אותן פקודות, עם `curl.exe` במקום `curl`, וגרשיים סביב שם הקובץ. למשל `--data-binary "@accounts.csv"`.
@@ -265,7 +280,7 @@ Windows: אותן פקודות, עם `curl.exe` במקום `curl`, וגרשיי�
 
 1. מייבאים את ארבעת קובצי ה-CSV של החודש שעבר.
 2. מריצים סנכרון GitHub (שלב 3ג).
-3. `curl -X POST localhost:8000/api/v1/jobs/compute-pnl`
+3. `curl -H "Authorization: Bearer $FL_API_TOKEN" -X POST localhost:8000/api/v1/jobs/compute-pnl`
 4. נכנסים ל-**Feature Graph** ומאשרים שיוכים פתוחים. ככל שתאשר יותר, הנתונים מדויקים יותר.
 5. בדשבורד: מסננים **Zombie**, בודקים בסימולטור ופותחים תהליך **Safe Sunset** לפיצ'ר המתאים.
 
@@ -343,6 +358,38 @@ docker compose up -d --build
 
 ---
 
+## חלק ג׳4: כניסה עם SSO, דגלים חיים ו-PR אוטומטי (Phase 4)
+
+### כניסה עם SSO של החברה
+
+רושמים ב-`.env`:
+
+| משתנה | מה לרשום |
+| --- | --- |
+| `APP_URL` | הכתובת שבה פותחים את הדשבורד, למשל `https://featureledger.mycompany.com` |
+| `SESSION_SECRET` | מחרוזת סודית ארוכה: `openssl rand -base64 48`. **חובה** מחוץ לדמו |
+| `OIDC_PROVIDER` | `okta`, `google` או `auth0` |
+| `OIDC_ISSUER` | Okta: `https://<החברה>.okta.com/oauth2/default` · Auth0: `https://<tenant>.us.auth0.com/` · Google: לא צריך |
+| `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | מהאפליקציה שיוצרים אצל ספק ה-SSO |
+| `OIDC_ROLE_MAP` | קבוצה אצל הספק = תפקיד, למשל `FL-Admins=admin,FL-Product=pm_tech_lead,FL-CS=cs_lead` |
+| `BOOTSTRAP_ADMIN_EMAILS` | המייל שלך, כדי שתהיה Admin בכניסה הראשונה |
+| `OIDC_ALLOWED_DOMAINS` | ב-Google: הדומיין של החברה, למשל `mycompany.com` |
+
+אצל ספק ה-SSO יוצרים אפליקציית "Web" מסוג OpenID Connect ורושמים בה את כתובת החזרה (Redirect URI):
+`<APP_URL>/api/v1/auth/oidc/callback`. ב-Okta מוסיפים ל-token את ה-claim בשם `groups`. ב-Google אין קבוצות: משתמשים חדשים נכנסים כ-Viewer, וה-Admin משנה להם תפקיד במסך **Settings & access**.
+
+### דגלים חיים (LaunchDarkly או Statsig)
+
+- **LaunchDarkly:** `LAUNCHDARKLY_API_TOKEN` (טוקן עם הרשאת Writer לפרויקט), `LAUNCHDARKLY_PROJECT_KEY`, `LAUNCHDARKLY_ENVIRONMENT_KEY` (למשל `production`). הדגל צריך להיות בוליאני, והלקוחות מזוהים לפי context מסוג `account` (משנים ב-`LAUNCHDARKLY_CONTEXT_KIND`).
+- **Statsig:** `STATSIG_CONSOLE_API_KEY`, ו-Event Webhook שמצביע ל-`<APP_URL>/api/v1/flags/webhooks/statsig?org=<DEFAULT_ORG_SLUG>` עם הסוד ב-`STATSIG_WEBHOOK_SECRET`.
+- שם הדגל הוא ה-`flag_key` של הפיצ'ר ב-features.yaml. מזהה הלקוח בדגל הוא מזהה ה-Stripe שלו (`FLAG_ACCOUNT_KEY=external_ref`).
+
+### PR אוטומטי למחיקת הקוד
+
+1. יוצרים טוקן GitHub **נפרד** (Fine-grained) לריפו אחד, עם הרשאות *Contents: Read and write* ו-*Pull requests: Read and write*. הטוקן הרגיל (`GITHUB_TOKEN`) נשאר לקריאה בלבד.
+2. ב-`.env`: `GITHUB_CLEANUP_TOKEN=<הטוקן>` ו-`SUNSET_CLEANUP_REPO=owner/repo`.
+3. ב-webhook של GitHub (חלק ג׳3) מסמנים גם את האירוע **Pull requests**, כדי שמיזוג ה-PR יעביר את הפיצ'ר לארכיון.
+
 ## חלק ד׳: פתרון תקלות
 
 | בעיה | פתרון |
@@ -359,6 +406,11 @@ docker compose up -d --build
 | Dead letters | פריטים שנכשלו 5 פעמים. לוחצים **Show dead letters** כדי לראות את הסיבה, ואחרי התיקון לוחצים **Retry all**. |
 | כרטיס GitHub במצב Failing עם "features.yaml rejected" | ה-push האחרון הכיל קובץ לא תקין. רשימת השגיאות מופיעה בכרטיס. מתקנים ועושים push חדש; עד אז הגרסה הקודמת ממשיכה לפעול. |
 | "the sync queue (Redis) is not reachable" | שירות ה-Redis לא עלה. מריצים `docker compose ps` ואז `docker compose up -d`. |
+| `401 unauthenticated` בפקודת curl | חסר טוקן. ראו ההערה בתחילת חלק ג׳, או `make token` בדמו. |
+| `403 forbidden` | לתפקיד שלך אין הרשאה לפעולה. השגיאה אומרת איזו הרשאה חסרה; Admin משנה תפקידים במסך Settings & access. |
+| `409 flag_still_served` / `customer_screamed` | בזמן מבחן הצעקות הדגל הוחזר ללקוח או נפתח טיקט. בודקים מה קרה, ואם צריך לוחצים Roll back. |
+| `502 flag_provider_error` או `cleanup_pr_error` | LaunchDarkly, Statsig או GitHub סירבו (בדרך כלל הרשאות טוקן). שום דבר לא השתנה; מתקנים ומנסים שוב. |
+| מסך הכניסה לא מציג כפתורים | `SANDBOX_MODE=false` ואין הגדרות SSO. ממלאים את משתני ה-`OIDC_*` (חלק ג׳4). |
 
 ---
 
@@ -371,5 +423,7 @@ docker compose up -d --build
 | איך מחולקת ההכנסה בין פיצ'רים | `backend/app/core/attribution.py` |
 | כללי הסיווג (Zombie, Anchor...) | `backend/app/core/pnl.py`, הפונקציה `classify` |
 | שלבי ההסרה והתנאים שלהם | `backend/app/core/sunset.py` |
+| מה קורה בכל שלב (דגל, PR) | `backend/app/execution/orchestrator.py` |
+| מי מורשה לעשות מה | `backend/app/auth/rbac.py` |
 | מסכי הדשבורד | `web/app/` |
 | כל הנוסחאות בהסבר מלא | `docs/SPEC.md` |

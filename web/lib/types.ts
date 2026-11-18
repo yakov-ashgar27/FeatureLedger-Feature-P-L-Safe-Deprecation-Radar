@@ -141,9 +141,51 @@ export interface SunsetPlan {
     accounts: { account_id: string; name: string; arr_usd: number; churn_risk: number; plan_tier: string;
       feature_active_days_90d: number; acknowledged: boolean; email_draft: string; csm_email: string | null }[];
   } | null;
-  canary?: { phase: string | null; fully_off_at?: string; rollbacks?: number } | null;
-  cleanup_pr?: { title: string; branch: string; body_markdown: string; files_to_delete: string[]; files_to_edit: string[] } | null;
-  audit_log?: { id: number; from_state: string | null; to_state: string; action: string; payload: Record<string, unknown>; created_at: string; hash: string }[];
+  canary?: { phase: string | null; fully_off_at?: string; started_at?: string; rollbacks?: number; keep_on_for_count?: number;
+    provider?: string; alerted?: { on: number; tickets: number } } | null;
+  rollback_count?: number;
+  cleanup_pr?: {
+    title: string; branch: string; body_markdown: string; files_to_delete: string[]; files_to_edit: string[];
+    provider?: "sandbox" | "github"; repo?: string; number?: number; url?: string | null; state?: "open" | "merged" | "closed";
+    opened_at?: string; merged_at?: string; merge_sha?: string; routes_to_remove?: string[];
+  } | null;
+  audit_log?: AuditEntry[];
+  flag?: FlagStatus | null;
+  pull_request?: { provider: string; repo: string; number: number; url: string | null; branch: string; state: string } | null;
+  pull_requests?: { provider: string; repo: string; number: number; url: string | null; branch: string; state: string;
+    created_at: string; merged_at: string | null; merge_sha: string | null }[];
+  scream_test?: ScreamTest | null;
+}
+
+export interface AuditEntry {
+  id: number; from_state: string | null; to_state: string; action: string; created_at: string; hash: string;
+  prev_hash?: string | null;
+  payload: Record<string, unknown> & { actor?: string; actor_role?: string; flag_state?: string };
+}
+
+export interface FlagStatus {
+  state: "fully_on" | "zero_usage_off" | "fully_off";
+  provider: string | null;
+  keep_on_for_count?: number;
+  updated_at?: string;
+  last_error?: string | null;
+}
+
+export interface ScreamTest {
+  fully_off_at: string; quiet_days: number; required_days: number; flag_on_evaluations: number;
+  flag_off_evaluations: number; tickets_since_off: number;
+}
+
+export type Role = "viewer" | "pm_tech_lead" | "cs_lead" | "admin";
+
+export interface Me {
+  id: string | null; email: string; name: string | null; role: Role; kind: "user" | "service";
+  org: { id: string; slug: string }; permissions: string[];
+}
+
+export interface AuthConfig {
+  sandbox_mode: boolean; dev_login: boolean; roles: Role[];
+  oidc: { enabled: boolean; provider?: string; label?: string };
 }
 
 export interface TriageItem {

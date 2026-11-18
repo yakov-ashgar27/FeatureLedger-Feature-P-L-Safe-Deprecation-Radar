@@ -11,7 +11,7 @@ from ..graph.jobs import run_graph
 from ..graph.manifest_store import active_manifest
 from ..graph.reallocate import load_resolver, reallocate
 from ..jobs.compute_pnl import recompute
-from .deps import current_org, row
+from .deps import current_org, org_for, row
 
 router = APIRouter(prefix="/api/v1", tags=["feature-graph"])
 
@@ -67,7 +67,7 @@ async def _clear_machine(conn, subject_type: str, sid, label: str) -> None:
 
 
 @router.post("/triage/{suggestion_id}")
-async def decide(suggestion_id: str, body: Decision, org: str = Depends(current_org)):
+async def decide(suggestion_id: str, body: Decision, org: str = Depends(org_for("triage:decide"))):
     """A person's decision. Writes a `human` mapping (which outranks manifest and machine) or a rejection
     that the tiers will never re-propose, then re-allocates PR effort."""
     async with org_tx(org) as conn:
@@ -119,7 +119,7 @@ async def decide(suggestion_id: str, body: Decision, org: str = Depends(current_
 
 
 @router.post("/graph/run")
-async def graph_run(recompute_pnl: bool = True, org: str = Depends(current_org)):
+async def graph_run(recompute_pnl: bool = True, org: str = Depends(org_for("graph:run"))):
     """Re-run reallocation and Tier 2 now (Tier 3 runs inside syncs, where text is available)."""
     async with org_tx(org) as conn:
         out = await run_graph(conn, org)
