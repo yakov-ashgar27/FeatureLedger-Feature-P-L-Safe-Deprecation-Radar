@@ -328,8 +328,13 @@ async def handle_pr_merged(conn, org: str, repo: str, number: int, merge_sha: st
         return {"matched": False}
     if pr["state"] == "merged":
         return {"matched": True, "already_merged": True}
-    await conn.execute("""UPDATE cleanup_pull_requests SET state = 'merged', merged_at = coalesce($2::timestamptz, now()),
-                                 merge_sha = $3 WHERE id = $1""", pr["id"], merged_at, merge_sha)
+    try:
+        merged_ts = datetime.fromisoformat(merged_at.replace("Z", "+00:00")) if merged_at else datetime.now(timezone.utc)
+    except ValueError:
+        merged_ts = datetime.now(timezone.utc)
+    merged_at = merged_ts.isoformat()
+    await conn.execute("""UPDATE cleanup_pull_requests SET state = 'merged', merged_at = $2, merge_sha = $3
+                           WHERE id = $1""", pr["id"], merged_ts, merge_sha)
     p = await load(conn, pr["plan_id"], for_update=True)
     if p["state"] != SunsetState.DEAD_CODE_PR_OPENED.value:
         return {"matched": True, "plan_state": p["state"], "archived": False}
