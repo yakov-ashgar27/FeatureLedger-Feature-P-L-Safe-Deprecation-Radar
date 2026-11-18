@@ -5,6 +5,8 @@ hourly. Idempotent: it rewrites only what changed and never touches human decisi
 """
 from __future__ import annotations
 
+import logging
+import time
 from typing import Any
 
 from .manifest_store import active_manifest
@@ -70,13 +72,28 @@ async def run_structural(conn, org_id: str, resolver) -> dict[str, Any]:
     return stats
 
 
+log = logging.getLogger("featureledger.graph")
+
+
 async def run_graph(conn, org_id: str, vault: TextVault | None = None, embedder=None, explainer=None) -> dict[str, Any]:
+    t, timings = time.monotonic(), {}
+
+    def lap(name: str) -> None:
+        nonlocal t
+        now = time.monotonic()
+        timings[name] = round(now - t, 2)
+        t = now
+        log.info("graph %s: %s done in %.2fs", org_id, name, timings[name])
     manifest = await active_manifest(conn)
     resolver = await load_resolver(conn, manifest)
     before = await reallocate(conn, org_id, resolver)
+    lap("reallocate")
     tier2 = await run_structural(conn, org_id, resolver)
+    lap("tier2")
     resolver = await load_resolver(conn, manifest)
     after = await reallocate(conn, org_id, resolver)
+    lap("reallocate_after_tier2")
     tier3 = await run_semantic(conn, org_id, manifest, vault, embedder, explainer)
+    lap("tier3")
     return {"reallocated": before["reallocated"] + after["reallocated"], "protected_human": after["protected_human"],
-            "tier2": tier2, "tier3": tier3}
+            "tier2": tier2, "tier3": tier3, "timings_s": timings}

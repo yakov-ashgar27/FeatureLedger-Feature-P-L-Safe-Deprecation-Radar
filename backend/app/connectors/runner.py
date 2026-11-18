@@ -6,6 +6,7 @@ transaction factory (app.db.org_tx in production), injectable for tests.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Awaitable, Callable
 
 from ..config import config
@@ -115,8 +116,12 @@ async def sync_org(tx: Callable[..., Any], org_id: str, integrations: list[dict[
     vault = TextVault()
     try:
         for integ in sorted(integrations, key=lambda i: order.get(i["kind"], 99)):
+            t0 = time.monotonic()
             results.append(await run_integration(tx, org_id, integ, trigger, store, manifest_text, vault))
+            log.info("sync %s: %s %s in %.1fs", org_id, integ["kind"], results[-1]["status"], time.monotonic() - t0)
+        t0 = time.monotonic()
         st = await process_org(tx, org_id, [r["run_id"] for r in results])
+        log.info("sync %s: processed %d envelopes in %.1fs", org_id, st.processed, time.monotonic() - t0)
         async with tx(org_id) as conn:
             graph = await run_graph(conn, org_id, vault)
     finally:

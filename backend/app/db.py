@@ -20,6 +20,9 @@ _pool: asyncpg.Pool | None = None
 async def _init_conn(conn: asyncpg.Connection) -> None:
     for typ in ("json", "jsonb"):
         await conn.set_type_codec(typ, encoder=json.dumps, decoder=json.loads, schema="pg_catalog")
+    # pgvector: bind and read vectors as their text form '[0.1,0.2,...]' (no extra client library)
+    if await conn.fetchval("SELECT to_regtype('public.vector') IS NOT NULL"):
+        await conn.set_type_codec("vector", encoder=str, decoder=str, schema="public", format="text")
 
 
 async def init_pool(dsn: str | None = None) -> asyncpg.Pool:
