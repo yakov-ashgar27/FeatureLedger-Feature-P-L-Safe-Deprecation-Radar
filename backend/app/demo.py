@@ -43,7 +43,7 @@ def demo_seed_sql(seed_sql: str, slug: str, name: str) -> str:
     return "\n".join(ln for ln in sql.splitlines() if ln.strip() not in ("BEGIN;", "COMMIT;"))
 
 
-async def reset_demo(dsn: str | None = None) -> dict:
+async def reset_demo(dsn: str | None = None, converge_now: bool = True) -> dict:
     """Delete the demo org (only if it is flagged is_demo) and seed it again; then compute its P&L."""
     import asyncpg
     from .db import _init_conn
@@ -72,9 +72,12 @@ async def reset_demo(dsn: str | None = None) -> dict:
             await conn.execute("UPDATE organizations SET is_demo = true WHERE id = $1::uuid", org_id)
             await conn.execute("""UPDATE integrations SET sandbox = true, status = 'active', last_error = NULL
                                    WHERE org_id = $1::uuid AND kind <> 'github'""", org_id)
+        # ~30k rows were just bulk-loaded: without fresh statistics the planner picks nested loops and
+        # Tier 3's subject collection took ~6 minutes instead of well under a second
+        await conn.execute("ANALYZE")
     finally:
         await conn.close()
-    converged = await converge(org_id)
+    converged = await converge(org_id) if converge_now else {}
     pnl = converged.get("pnl") or await recompute_org(org_id)   # app role + RLS, never the admin connection
     took = round(time.monotonic() - t0, 1)
     log.info("demo org %s reset in %ss: %s", config.demo_org_slug, took, pnl.get("classes"))
@@ -110,4 +113,5 @@ async def ensure_demo(conn) -> str | None:
         return None
     if await conn.fetchval("SELECT 1 FROM organizations WHERE slug = $1", config.demo_org_slug):
         raise SystemExit(f"DEMO_ORG_SLUG {config.demo_org_slug!r} is taken by a real organization")
-    return (await reset_demo())["org_id"]
+    # startup stays fast: the worker's run-at-startup sync converges the demo with the very same pipeline
+    return (await reset_demo(converge_now=False))["org_id"]
