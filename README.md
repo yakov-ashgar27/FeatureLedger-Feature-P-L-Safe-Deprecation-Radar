@@ -311,6 +311,11 @@ CI (`.github/workflows/ci.yml`) runs three jobs:
 
 Until accounts and usage are imported, every feature is classified **Watch**: cost alone never makes a Zombie.
 
+On **Windows** without `make`: `powershell -ExecutionPolicy Bypass -File .\scripts\sync-github.ps1 -Repo owner/name -Team team-key`.
+If ports 3000 / 8000 are taken, set `WEB_PORT`, `API_PORT` and `APP_URL` in `.env`. Both merged pull requests and
+commits pushed straight to the default branch are counted (never the same work twice).
+The rollout to real data, step by step with what we found, is logged in [`docs/ROLLOUT.md`](docs/ROLLOUT.md).
+
 ## Principles
 
 - **No surveillance.** No author, reviewer or assignee is stored anywhere. Teams under 3 people are rolled up.

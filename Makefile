@@ -3,7 +3,9 @@ comma := ,
 
 # Every API call needs a session (Phase 4). FL_API_TOKEN from .env if set (service admin), otherwise a
 # SANDBOX_MODE dev login as admin. Override: make pnl TOKEN=<token>
-TOKEN ?= $(or $(shell grep -E '^FL_API_TOKEN=.+' .env 2>/dev/null | cut -d= -f2-),$(shell curl -s -X POST localhost:8000/api/v1/auth/dev-login -H 'Content-Type: application/json' -d '{"role":"admin"}' | python3 -c 'import json,sys; print(json.load(sys.stdin).get("token",""))' 2>/dev/null))
+TOKEN ?= $(or $(shell grep -E '^FL_API_TOKEN=.+' .env 2>/dev/null | cut -d= -f2-),$(shell curl -s -X POST $(API)/api/v1/auth/dev-login -H 'Content-Type: application/json' -d '{"role":"admin"}' | python3 -c 'import json,sys; print(json.load(sys.stdin).get("token",""))' 2>/dev/null))
+API_PORT ?= $(or $(shell grep -E '^API_PORT=.+' .env 2>/dev/null | cut -d= -f2-),8000)
+API = http://localhost:$(API_PORT)
 AUTH = -H "Authorization: Bearer $(TOKEN)"
 
 up:            ## build and start everything (http://localhost:3000)
@@ -31,17 +33,17 @@ draft-manifest: ## draft features.yaml from a local checkout: make draft-manifes
 	@echo "-> features.draft.yaml: review it, then copy what is right into features.yaml"
 
 sync-github:   ## ingest a real repo: make sync-github REPO=owner/name [TEAM=team-key]
-	curl -s -X POST localhost:8000/api/v1/integrations/github/sync $(AUTH) -H 'Content-Type: application/json' \
+	curl -s -X POST $(API)/api/v1/integrations/github/sync $(AUTH) -H 'Content-Type: application/json' \
 	  -d '{"repo": "$(REPO)"$(if $(TEAM),$(comma) "default_team_key": "$(TEAM)")}'
 
 apply-manifest: ## re-read features.yaml into the Feature Graph
-	curl -s -X POST localhost:8000/api/v1/manifest/apply $(AUTH); echo
+	curl -s -X POST $(API)/api/v1/manifest/apply $(AUTH); echo
 
 import:        ## make import KIND=accounts FILE=templates/accounts.csv PERIOD=2026-10
-	curl -s -X POST "localhost:8000/api/v1/import/$(KIND)?period=$(PERIOD)" $(AUTH) --data-binary @$(FILE); echo
+	curl -s -X POST "$(API)/api/v1/import/$(KIND)?period=$(PERIOD)" $(AUTH) --data-binary @$(FILE); echo
 
 pnl:           ## recompute the P&L for every month
-	curl -s -X POST localhost:8000/api/v1/jobs/compute-pnl $(AUTH); echo
+	curl -s -X POST $(API)/api/v1/jobs/compute-pnl $(AUTH); echo
 
 token:         ## print an admin token (for curl or the Authorize button at localhost:8000/docs)
 	@echo $(TOKEN)

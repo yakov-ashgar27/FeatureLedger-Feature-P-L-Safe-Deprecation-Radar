@@ -405,6 +405,21 @@ docker compose up -d --build
 2. ב-`.env`: `GITHUB_CLEANUP_TOKEN=<הטוקן>` ו-`SUNSET_CLEANUP_REPO=owner/repo`.
 3. ב-webhook של GitHub (חלק ג׳3) מסמנים גם את האירוע **Pull requests**, כדי שמיזוג ה-PR יעביר את הפיצ'ר לארכיון.
 
+## חלק ג׳4.5: חיבור GitHub אמיתי ב-Windows (בלי make)
+
+1. **טוקן:** ב-github.com/settings/personal-access-tokens/new: בוחרים רק את ה-repo של המוצר,
+   והרשאות **Contents: Read-only** ו-**Pull requests: Read-only**. מדביקים ב-`.env` בשורה `GITHUB_TOKEN=`.
+2. **פורטים תפוסים?** אם `docker compose up` כותב `port is already allocated`, כותבים ב-`.env`:
+   `WEB_PORT=3010`, `API_PORT=8010`, `APP_URL=http://localhost:3010`, ומריצים שוב `docker compose up -d`.
+   המסך יהיה אז בכתובת localhost:3010.
+3. **משיכת הנתונים** (ב-PowerShell, מתוך תיקיית FeatureLedger):
+   ```
+   powershell -ExecutionPolicy Bypass -File .\scripts\sync-github.ps1 -Repo שם-משתמש/שם-repo -Team מפתח-צוות
+   ```
+   נספרים גם pull requests ממוזגים וגם commits שנדחפו ישר ל-main, בלי לספור את אותה עבודה פעמיים.
+
+יומן המעבר לנתונים אמיתיים, עם כל מה שגילינו בדרך: `docs/ROLLOUT.md`.
+
 ## חלק ג׳5: אמון, אבטחה והסרה בטוחה
 
 - **"עד כמה המספר הזה בטוח?"** ליד כל פיצ'ר בטבלה יש סימן ●●● / ●●○ / ●○○. בדף הפיצ'ר, "Why this number?" מראה מאיפה

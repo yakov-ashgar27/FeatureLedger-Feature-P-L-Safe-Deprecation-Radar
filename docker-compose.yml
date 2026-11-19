@@ -1,4 +1,5 @@
 # FeatureLedger: `docker compose up --build`, then open http://localhost:3000
+# Ports taken on your computer? Set WEB_PORT / API_PORT (and APP_URL) in .env.
 # Connector credentials are read from .env (optional): only the variables you set are used.
 x-connector-env: &connector-env
   CONNECTOR_BACKFILL_MONTHS: ${CONNECTOR_BACKFILL_MONTHS:-6}
@@ -112,8 +113,8 @@ services:
       DEFAULT_ORG_SLUG: ${DEFAULT_ORG_SLUG:-northwind}
       ORG_NAME: ${ORG_NAME:-My Company}
       FL_API_TOKEN: ${FL_API_TOKEN:-}
-      CORS_ORIGINS: http://localhost:3000
-    ports: ["8000:8000"]
+      CORS_ORIGINS: ${APP_URL:-http://localhost:3000}
+    ports: ["${API_PORT:-8000}:8000"]
     volumes:
       # edit features.yaml on your machine, then POST /api/v1/manifest/apply (or restart the api)
       - ./features.yaml:/srv/features.yaml:ro
@@ -145,7 +146,7 @@ services:
     depends_on: { api: { condition: service_healthy } }
     environment:
       API_URL: http://api:8000
-    ports: ["3000:3000"]
+    ports: ["${WEB_PORT:-3000}:3000"]
 
 volumes:
   pgdata:

@@ -485,6 +485,9 @@ plan is leaving: candidate → `sunset:blast_radius` (PM/TL, admin); blast_radiu
   (errors, calls to a feature's API routes) are attributed by tag, then route, then stack-frame path. During a sunset,
   `errors_during_canary` blocks the promote to fully off; `errors_after_off` and `deprecated_route_called` block the
   cleanup PR. Admins can dismiss a signal as unrelated (kept with who and why).
+- **Direct pushes** (`0011_direct_commits.sql`). Commits pushed straight to the default branch are work items of
+  type `commit`, normalized like PRs (effort from size, allocation from paths, kind from the message's first line,
+  which is not stored). Merge commits and commits that belong to any pull request are skipped.
 - **Onboarding.** `/glossary` and column / badge tooltips in plain language (`web/lib/glossary.ts`); a `features.yaml`
   draft generator (`python -m app.tools.draft_manifest <repo>`, `make draft-manifest REPO=...`).
 
