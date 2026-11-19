@@ -5,7 +5,7 @@ Every finding that needed a code change links to it. Newest entries last.
 
 | Stage | What | Status |
 | --- | --- | --- |
-| 1 | Real GitHub data (read-only token), then Zombie-Guard comments and a cleanup PR on a test repository | in progress |
+| 1 | Real GitHub data (read-only token), then Zombie-Guard comments and a cleanup PR on a test repository | data: done · PR bot: next |
 | 2 | Stripe (test mode), PostHog (free tier), Slack webhook | not started |
 | 3 | Production: domain + HTTPS, SSO (Google / Auth0), secrets manager, database backups, several API workers, alerts, LaunchDarkly / Statsig | not started |
 
@@ -56,6 +56,24 @@ Sync on Windows: `powershell -ExecutionPolicy Bypass -File .\scripts\sync-github
    only (≤ 0.001) are rescaled instead of refused. Lesson: one bad row must not take the service down; tracked as
    a follow-up (recompute failures should be logged and reported, not fatal at startup).
 6. *No `make` on Windows.* `scripts/sync-github.ps1` does the sync and prints the ledger with PowerShell only.
+
+**Result (2026-11-19 18:51).** The ledger shows wifi-doctor's November from its 10 real commits: engineering
+cost $10,584 (1 engineer × 112 allocatable h × $95), split by change size and paths:
+
+| Feature | Eng / month | Bug tax |
+| --- | ---: | ---: |
+| Platform (shared) | $4,893 | 18% |
+| Root Cause Analysis | $1,523 | 44% |
+| Bufferbloat Stress Test | $1,372 | 37% |
+| Live Telemetry | $1,171 | 2% |
+| Incident Log | $546 | 25% |
+| Wi-Fi Radio Stats | $518 | 0% |
+| Chaos Simulator | $291 | 21% |
+| Topology Map | $270 | 0% |
+
+As expected without revenue or usage data: value $0, every product feature *Watch*, confidence low (●○○)
+except Platform (cost only by design, ●●●). The bug-tax column already says something real: most of the
+week's fixes went into root cause analysis and the stress test.
 
 **Still to do in Stage 1:** check the ledger and tear-sheets on the real data; Zombie-Guard comments and a
 cleanup PR on a test branch of the product repository.
