@@ -1,4 +1,5 @@
 .PHONY: up down reset test seed-sql logs sync-github import apply-manifest pnl token e2e
+comma := ,
 
 # Every API call needs a session (Phase 4). FL_API_TOKEN from .env if set (service admin), otherwise a
 # SANDBOX_MODE dev login as admin. Override: make pnl TOKEN=<token>
@@ -23,9 +24,9 @@ test:          ## backend unit + end-to-end engine tests (no database needed)
 seed-sql:      ## write the deterministic seed as plain SQL
 	cd backend && python -m app.seed.generate --manifest ../features.yaml --out ../db/seed.sql
 
-sync-github:   ## ingest a real repo: make sync-github REPO=owner/name
+sync-github:   ## ingest a real repo: make sync-github REPO=owner/name [TEAM=team-key]
 	curl -s -X POST localhost:8000/api/v1/integrations/github/sync $(AUTH) -H 'Content-Type: application/json' \
-	  -d '{"repo": "$(REPO)"}'
+	  -d '{"repo": "$(REPO)"$(if $(TEAM),$(comma) "default_team_key": "$(TEAM)")}'
 
 apply-manifest: ## re-read features.yaml into the Feature Graph
 	curl -s -X POST localhost:8000/api/v1/manifest/apply $(AUTH); echo

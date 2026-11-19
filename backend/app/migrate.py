@@ -84,6 +84,14 @@ async def bootstrap_real_org(conn: asyncpg.Connection) -> str:
         org_id = await ensure_org(conn, config.default_org_slug, config.org_name)
         res = await record_and_apply(conn, org_id, config.manifest_path.read_text(), source="disk",
                                      path="features.yaml")
+        # the first admins of a fresh install: SSO upgrades them on first login; on a laptop with
+        # SANDBOX_MODE=true they can use the dev login (role "Admin") before SSO exists
+        for email in config.bootstrap_admins:
+            await conn.execute("""INSERT INTO users (org_id, email, name, role) VALUES ($1, $2, $3, 'admin')
+                                  ON CONFLICT (org_id, email) DO UPDATE SET role = 'admin', disabled = false""",
+                               org_id, email, email.split("@")[0])
+        if config.bootstrap_admins:
+            log.info("bootstrap admins: %s", ", ".join(config.bootstrap_admins))
     if res.status == "invalid":
         raise SystemExit(f"features.yaml is invalid: {res.errors}")
     log.info("org %s (%s): features.yaml %s %s", config.default_org_slug, org_id, res.status, res.summary)
