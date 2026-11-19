@@ -140,7 +140,7 @@ async def main(seed: bool) -> None:
         await conn.close()
     if org_id:
         from .jobs.compute_pnl import recompute_org
-        summary = await recompute_org(org_id, dsn=config.admin_database_url)
+        summary = await recompute_org(org_id)   # as the RLS-bound app role: never with the admin DSN
         log.info("computed P&L: %s", summary)
 
 

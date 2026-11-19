@@ -87,9 +87,10 @@ async def load_dataset(conn: asyncpg.Connection, months: list[date]) -> Dataset:
 async def write_result(conn: asyncpg.Connection, org_id: str, res: PnlResult, ds: Dataset) -> None:
     months = res.months
     for table in ("feature_pnl_monthly", "account_dependencies", "eng_capacity_monthly"):
-        await conn.execute(f"DELETE FROM {table} WHERE period_month = ANY($1::date[])", months)
-    await conn.execute("""DELETE FROM cost_events WHERE source = 'featureledger.model'
-                          AND period_month = ANY($1::date[])""", months)
+        await conn.execute(f"DELETE FROM {table} WHERE org_id = $2 AND period_month = ANY($1::date[])",
+                           months, org_id)
+    await conn.execute("""DELETE FROM cost_events WHERE org_id = $2 AND source = 'featureledger.model'
+                          AND period_month = ANY($1::date[])""", months, org_id)
     await conn.executemany("""
         INSERT INTO feature_pnl_monthly (org_id, feature_id, period_month, eng_hours, bug_hours, c_eng, c_support,
             c_infra, c_total, c_overhead_alloc, v_usage, v_tier, revenue_at_risk_arr, tickets, active_accounts,
@@ -135,6 +136,9 @@ async def write_result(conn: asyncpg.Connection, org_id: str, res: PnlResult, ds
 async def recompute(conn: asyncpg.Connection, org_id: str, months: list[date] | None = None) -> dict:
     """Run inside an org-scoped transaction. Serialized per org: concurrent recomputes (worker + API) queue
     on a transaction-level advisory lock instead of colliding on the ledger's primary keys."""
+    if await conn.fetchval("""SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user"""):
+        # every read below relies on RLS for tenant scoping: a superuser would mix tenants
+        raise RuntimeError("recompute must run as the RLS-bound application role (DATABASE_URL), not an admin role")
     await conn.execute("SELECT pg_advisory_xact_lock(hashtext('featureledger:pnl:' || $1))", org_id)
     months = months or await available_months(conn)
     if not months:

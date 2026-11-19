@@ -143,6 +143,7 @@ def test_demo_launch_switch_and_isolation(client):
     assert created.status_code == 201
 
     # reset: back to the seed state, same ids, sessions still valid
+    real_ledger = client.get("/api/v1/pnl?window=3", headers=H(real)).json()
     r = client.post("/api/v1/demo/reset", headers=H(t))
     assert r.status_code == 200, r.text
     after = client.get("/api/v1/sunset-plans", headers=H(t)).json()
@@ -151,5 +152,6 @@ def test_demo_launch_switch_and_isolation(client):
     assert all(p["feature_key"] != "legacy-pdf-export" for p in after)
     led = client.get("/api/v1/pnl?window=1", headers=H(t)).json()
     assert led["summary"]["zombie_count"] == 3 and led["summary"]["margin_bleed_features"] == ["ai-summaries"]
-    # the real tenant was untouched by the reset
+    # the real tenant was untouched by the reset (regression: an admin-connection recompute once wiped every ledger)
     assert client.get("/api/v1/sunset-plans", headers=H(real)).json() == real_plans
+    assert client.get("/api/v1/pnl?window=3", headers=H(real)).json() == real_ledger

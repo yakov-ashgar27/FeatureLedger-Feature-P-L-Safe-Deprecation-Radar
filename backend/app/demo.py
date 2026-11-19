@@ -74,7 +74,7 @@ async def reset_demo(dsn: str | None = None) -> dict:
                                    WHERE org_id = $1::uuid AND kind <> 'github'""", org_id)
     finally:
         await conn.close()
-    pnl = await recompute_org(org_id, dsn=dsn or config.admin_database_url)
+    pnl = await recompute_org(org_id)   # app role + RLS: an admin connection would read every tenant
     took = round(time.monotonic() - t0, 1)
     log.info("demo org %s reset in %ss: %s", config.demo_org_slug, took, pnl.get("classes"))
     return {"org_id": org_id, "slug": config.demo_org_slug, "seconds": took, "pnl": pnl}
