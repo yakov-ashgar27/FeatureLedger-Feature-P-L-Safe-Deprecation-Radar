@@ -26,7 +26,7 @@ export function Nav() {
     <nav className="sticky top-0 flex h-screen print:hidden w-60 shrink-0 flex-col border-r border-rule bg-surface px-4 py-6">
       <Link href="/" className="mb-8 block px-2">
         <div className="text-[15px] font-semibold tracking-tight">FeatureLedger</div>
-        <div className="text-xs text-ink-3">Northwind Cloud</div>
+        <div className="text-xs text-ink-3">{me?.org.name ?? ""}</div>
       </Link>
       <ul className="space-y-1">
         {LINKS.map((l) => {

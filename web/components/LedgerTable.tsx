@@ -12,7 +12,8 @@ type Col = { key: keyof LedgerRow; label: string; fmt: (r: LedgerRow) => React.R
 const COLS: Col[] = [
   { key: "c_eng", label: "Eng", fmt: (r) => usd(r.c_eng), num: true },
   { key: "c_support", label: "Support", fmt: (r) => usd(r.c_support), num: true },
-  { key: "c_infra", label: "Infra + AI", fmt: (r) => usd(r.c_infra), num: true },
+  { key: "c_infra", label: "Cloud infra", fmt: (r) => usd(r.c_infra), num: true },
+  { key: "c_ai_tokens", label: "AI tokens", fmt: (r) => usd(r.c_ai_tokens), num: true },
   { key: "c_total", label: "Total cost", fmt: (r) => usd(r.c_total), num: true },
   { key: "value", label: "Value", fmt: (r) => usd(r.value), num: true },
   { key: "net_roi", label: "Net / mo", num: true,

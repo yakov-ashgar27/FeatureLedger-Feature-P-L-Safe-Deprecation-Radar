@@ -193,7 +193,7 @@ export type Role = "viewer" | "pm_tech_lead" | "cs_lead" | "admin";
 
 export interface Me {
   id: string | null; email: string; name: string | null; role: Role; kind: "user" | "service";
-  org: { id: string; slug: string }; permissions: string[]; demo?: boolean;
+  org: { id: string; slug: string; name?: string }; permissions: string[]; demo?: boolean;
 }
 
 export interface AuthConfig {

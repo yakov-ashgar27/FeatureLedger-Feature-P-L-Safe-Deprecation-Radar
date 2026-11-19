@@ -133,7 +133,10 @@ async def oidc_callback(request: Request, code: str | None = None, state: str | 
 
 @router.get("/auth/me")
 async def me(p: Principal = Depends(current_principal)):
-    return p.public()
+    out = p.public()
+    async with org_tx(p.org_id) as conn:
+        out["org"]["name"] = await conn.fetchval("SELECT name FROM organizations WHERE id = $1::uuid", p.org_id)
+    return out
 
 
 @router.post("/auth/logout")
