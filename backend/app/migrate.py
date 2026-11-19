@@ -62,6 +62,17 @@ async def provision_app_role(conn: asyncpg.Connection) -> None:
         REVOKE INSERT, UPDATE, DELETE ON schema_migrations FROM {APP_ROLE};
         ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {APP_ROLE};
     """)
+    # the blanket grant above includes partitions, which RLS does not protect when named directly:
+    # take every privilege on them back (the app reaches them through the parent) - see 0008
+    await conn.execute("""
+        DO $$
+        DECLARE r record;
+        BEGIN
+            FOR r IN SELECT c.oid::regclass AS part FROM pg_class c
+                      WHERE c.relkind = 'r' AND c.relispartition AND c.relnamespace = 'public'::regnamespace LOOP
+                PERFORM secure_partition(r.part);
+            END LOOP;
+        END $$""")
 
 
 async def seed_if_empty(conn: asyncpg.Connection) -> str | None:

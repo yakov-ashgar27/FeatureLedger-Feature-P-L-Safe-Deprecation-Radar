@@ -61,6 +61,14 @@ jobs:
           DATABASE_URL: postgresql://featureledger_app:app_dev_password@localhost:5432/featureledger
           ADMIN_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/featureledger
         run: cd backend && python -m pytest tests/test_phase5_api.py -v
+      - name: "Tenant isolation: catalog, partitions, privileged functions, every API route with foreign ids"
+        env:
+          FL_INTEGRATION: "1"
+          SANDBOX_MODE: "true"
+          DEMO_MODE: "true"
+          DATABASE_URL: postgresql://featureledger_app:app_dev_password@localhost:5432/featureledger
+          ADMIN_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/featureledger
+        run: cd backend && python -m pytest tests/test_isolation_api.py -v
 
   web:
     runs-on: ubuntu-latest
