@@ -190,6 +190,14 @@ export interface FlagStatus {
 export interface ScreamTest {
   fully_off_at: string; quiet_days: number; required_days: number; flag_on_evaluations: number;
   flag_off_evaluations: number; tickets_since_off: number;
+  errors_since_off?: number; deprecated_calls_since_off?: number;
+}
+
+export interface DamageSignal {
+  id: string; feature_key: string | null; source: "sentry" | "generic"; kind: "error" | "deprecated_call";
+  external_id: string; title: string | null; route: string | null; matched_by: "tag" | "route" | "path" | "none";
+  occurrences: number; occurred_at: string; received_at: string;
+  dismissed_at: string | null; dismissed_by: string | null; dismiss_reason: string | null;
 }
 
 export type Role = "viewer" | "pm_tech_lead" | "cs_lead" | "admin";

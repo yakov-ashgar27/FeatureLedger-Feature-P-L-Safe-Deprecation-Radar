@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { Gated, ROLE_LABEL, useCan, useMe } from "@/components/Auth";
+import { DamageSignals } from "@/components/DamageSignals";
 import { ErrorBox, SectionTitle } from "@/components/ui";
 import { apiGet, apiPost } from "@/lib/api";
 import { pct, STATE_LABEL, usd, usdShort } from "@/lib/format";
@@ -152,8 +153,11 @@ function PlanDetail({ id, onChange }: { id: string; onChange: () => void }) {
                 <Stat label="'on' evaluations" value={p.scream_test.flag_on_evaluations} bad />
                 <Stat label="tickets" value={p.scream_test.tickets_since_off} bad />
                 <Stat label="'off' evaluations" value={p.scream_test.flag_off_evaluations} />
+                <Stat label="production errors" value={p.scream_test.errors_since_off ?? 0} bad />
+                <Stat label="retired-route calls" value={p.scream_test.deprecated_calls_since_off ?? 0} bad />
               </div>
-              <div className="mt-2 text-xs text-ink-3">Fully off since {p.scream_test.fully_off_at.slice(0, 10)}. Any 'on' evaluation or ticket blocks the cleanup PR.</div>
+              <div className="mt-2 text-xs text-ink-3">Fully off since {p.scream_test.fully_off_at.slice(0, 10)}. Any 'on' evaluation, ticket, production error or call to the feature's API routes blocks the cleanup PR.</div>
+              <DamageSignals featureKey={p.feature_key} since={p.scream_test.fully_off_at} canDismiss={can("sunset:approve_cleanup")} onChange={load} />
             </>
           ) : <div className="text-sm text-ink-3">Starts when the flag goes fully off.</div>}
           {can("flags:simulate") && p.state === "canary_dark_launch" && p.flag_key && (

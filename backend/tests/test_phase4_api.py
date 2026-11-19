@@ -209,6 +209,36 @@ def test_scream_test_guards_then_cleanup_pr_then_merge_archives(client, tokens):
     assert r.status_code == 409 and r.json()["detail"]["code"] == "customer_screamed"
     admin_sql("DELETE FROM support_tickets WHERE external_id = 'ci-scream-1' AND org_id = $1", fid["org_id"])
 
+    # 2b) production damage during the scream test blocks the cleanup PR until an admin dismisses it
+    hook = f"/api/v1/webhooks/signals/sentry/{config.default_org_slug}"
+    sentry = {"action": "created", "data": {"error": {
+        "event_id": "ci0001", "title": "KeyError: 'zap' for jane.doe@example.com", "tags": [["environment", "production"]],
+        "exception": {"values": [{"stacktrace": {"frames": [
+            {"filename": "/srv/app/services/integrations/zapier_v1/hooks.py", "in_app": True}]}}]}}}}
+    assert client.post(hook, json=sentry, headers={"X-FeatureLedger-Secret": "wrong"}).status_code == 401
+    r = client.post(hook, json=sentry, headers={"X-FeatureLedger-Secret": "sandbox", "Sentry-Hook-Resource": "error"})
+    assert r.status_code == 202 and r.json()["signals"] == [{"id": "event:ci0001", "feature": "zapier-v1-webhooks",
+                                                           "matched_by": "path"}], r.text
+    r = client.post(f"/api/v1/sunset-plans/{zap}/advance", json={}, headers=A)
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "errors_after_off"
+    assert client.get(f"/api/v1/sunset-plans/{zap}", headers=A).json()["scream_test"]["errors_since_off"] == 1
+    sig = client.get("/api/v1/damage-signals?feature_key=zapier-v1-webhooks", headers=A).json()
+    assert len(sig) == 1 and "[email]" in sig[0]["title"] and "jane" not in sig[0]["title"]      # redacted
+    assert client.post(f"/api/v1/damage-signals/{sig[0]['id']}/dismiss", json={"reason": "unrelated deploy"},
+                       headers=P).status_code == 403                                             # admins only
+    assert client.post(f"/api/v1/damage-signals/{sig[0]['id']}/dismiss", json={"reason": "unrelated deploy"},
+                       headers=A).status_code == 200
+    gw = {"signals": [{"id": "gw-ci-1", "kind": "deprecated_call", "route": "/hooks/v1/zapier/123456?token=abc", "count": 3}]}
+    r = client.post(f"/api/v1/webhooks/signals/generic/{config.default_org_slug}", json=gw,
+                    headers={"X-FeatureLedger-Secret": "sandbox"})
+    assert r.status_code == 202 and r.json()["signals"][0]["matched_by"] == "route", r.text
+    r = client.post(f"/api/v1/sunset-plans/{zap}/advance", json={}, headers=A)
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "deprecated_route_called"
+    call = client.get("/api/v1/damage-signals?feature_key=zapier-v1-webhooks", headers=A).json()[0]
+    assert call["route"] == "/hooks/v1/zapier/:id" and call["occurrences"] == 3                   # no ids, no query
+    assert client.post(f"/api/v1/damage-signals/{call['id']}/dismiss", json={"reason": "our own health check"},
+                       headers=A).status_code == 200
+
     # 3) quiet: an admin approves -> the cleanup PR is opened on sunset/<feature_key>
     r = client.post(f"/api/v1/sunset-plans/{zap}/advance", json={}, headers=A)
     assert r.status_code == 200, r.text

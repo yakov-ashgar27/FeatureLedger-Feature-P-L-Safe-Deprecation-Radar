@@ -32,6 +32,9 @@ x-connector-env: &connector-env
   EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
   GITHUB_TOKEN: ${GITHUB_TOKEN:-}
   GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+  # sunset damage signals (Sentry internal integration client secret; HMAC secret for generic signals)
+  SENTRY_CLIENT_SECRET: ${SENTRY_CLIENT_SECRET:-}
+  SIGNALS_WEBHOOK_SECRET: ${SIGNALS_WEBHOOK_SECRET:-}
   # hardening: rate limits (shared through Redis), proxies trusted for X-Forwarded-For (1 = the dashboard)
   RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
   TRUSTED_PROXY_HOPS: ${TRUSTED_PROXY_HOPS:-1}

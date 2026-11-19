@@ -5,6 +5,9 @@
     rollback:  canary_dark_launch | dead_code_pr_opened -> customer_outreach  (flag re-enabled)
     cancel:    any non-terminal state -> cancelled
 
+Scream-test evidence that blocks progress: 'on' flag evaluations, support tickets, and damage signals
+(production errors and calls to the feature's deprecated API routes, app/core/damage.py).
+
 Every transition is a pure function of (plan, context) -> TransitionResult, so the API layer only
 persists the result + an audit row. Guards encode the "never delete blindly" rules.
 """
@@ -111,6 +114,10 @@ def advance(plan: PlanView, ctx: dict[str, Any], now: datetime | None = None) ->
     if s is SunsetState.CANARY_DARK_LAUNCH:
         canary = dict(plan.canary or {})
         if plan.canary_phase == "zero_usage_off":
+            if ctx.get("errors_since_canary", 0) > 0:
+                raise TransitionError("errors_during_canary",
+                                      f"{ctx['errors_since_canary']} production error(s) attributed to the feature since "
+                                      "the canary started: investigate (or dismiss as unrelated) before going fully off")
             # promote to 100% off; the scream-test clock starts now. Stays in the same state.
             canary.update(phase="fully_off", fully_off_at=now.isoformat())
             return TransitionResult(s, s, "canary_promote", {"canary": canary, "canary_phase": "fully_off"})
@@ -123,6 +130,12 @@ def advance(plan: PlanView, ctx: dict[str, Any], now: datetime | None = None) ->
             raise TransitionError("flag_still_served", "flag served the 'on' variation during the scream test")
         if ctx.get("tickets_since_off", 0) > 0:
             raise TransitionError("customer_screamed", "support tickets referenced the feature during the test")
+        if ctx.get("errors_since_off", 0) > 0:
+            raise TransitionError("errors_after_off", f"{ctx['errors_since_off']} production error(s) attributed to the "
+                                  "feature since it was switched off")
+        if ctx.get("deprecated_calls_since_off", 0) > 0:
+            raise TransitionError("deprecated_route_called", f"{ctx['deprecated_calls_since_off']} call(s) to the "
+                                  "feature's API routes since it was switched off: someone still depends on it")
         pr = ctx.get("cleanup_pr")
         if not pr:
             raise TransitionError("missing_cleanup_pr", "generate the dead-code PR outline first")

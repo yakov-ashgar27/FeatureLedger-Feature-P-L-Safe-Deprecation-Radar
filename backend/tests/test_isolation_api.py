@@ -117,6 +117,14 @@ def client():
         yield c
 
 
+def _seed_signal(org_id) -> list[str]:
+    """A damage signal in tenant A, so the sweep has a real foreign id to try (removed by the fixture)."""
+    return [str(sql("""INSERT INTO damage_signals (org_id, source, kind, external_id, matched_by, occurred_at)
+                       VALUES ($1, 'generic', 'error', 'isolation-probe', 'none', now() - interval '400 days')
+                       ON CONFLICT (org_id, source, external_id) DO UPDATE SET occurrences = 1
+                       RETURNING id""", org_id)[0]["id"])]
+
+
 @pytest.fixture(scope="module")
 def tenant_a():
     org = sql("SELECT id, name FROM organizations WHERE slug = $1", config.default_org_slug)[0]
@@ -130,6 +138,7 @@ def tenant_a():
         "feature_id": ids("SELECT id FROM features WHERE org_id = $1"),
         "account": ids("SELECT id FROM accounts WHERE org_id = $1 LIMIT 300"),
         "team": ids("SELECT id FROM teams WHERE org_id = $1"),
+        "signal": ids("SELECT id FROM damage_signals WHERE org_id = $1") or _seed_signal(org["id"]),
         "emails": [r[0] for r in sql("SELECT email FROM users WHERE org_id = $1", org["id"])],
         "feature": [r[0] for r in sql("SELECT key FROM features WHERE org_id = $1 ORDER BY key", org["id"])],
         "flag": [r[0] for r in sql("SELECT flag_key FROM features WHERE org_id = $1 AND flag_key IS NOT NULL",
@@ -152,6 +161,7 @@ PARAM_VALUES = {
     "suggestion_id": lambda a: a["suggestion"][0] if a["suggestion"] else str(uuid.uuid4()),
     "key": lambda a: a["feature"][0], "feature_key": lambda a: a["feature"][0], "flag_key": lambda a: a["flag"][0],
     "kind": lambda a: "blast_radius",
+    "signal_id": lambda a: a["signal"][0],
 }
 # bodies that reach the handler (not just pydantic) for routes whose bodies are required
 BODIES = {
@@ -165,6 +175,7 @@ BODIES = {
     "/api/v1/users/{user_id}": {"role": "viewer"},
     "/api/v1/flags/{flag_key}/evaluations": {"on_count": 1},
     "/api/v1/settings": {"eng_hourly_rate_usd": 1999},
+    "/api/v1/damage-signals/{signal_id}/dismiss": {"reason": "isolation probe"},
 }
 SKIP = {("POST", "/api/v1/integrations/github/sync")}   # would call api.github.com with the deployment token
 
@@ -172,7 +183,7 @@ SKIP = {("POST", "/api/v1/integrations/github/sync")}   # would call api.github.
 def secrets_of(a) -> list[str]:
     # (the org name is not a secret here: it also sits in the shared sample features.yaml comment)
     vals = [a["org"], *a["emails"]]
-    for k in ("plan", "user", "integration", "suggestion", "feature_id", "account", "team"):
+    for k in ("plan", "user", "integration", "suggestion", "feature_id", "account", "team", "signal"):
         vals += a[k]
     return [v for v in vals if v]
 

@@ -7,7 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from .api import admin, auth, demo, flags, graph, guard, imports, integrations, pnl, reports, sunset
+from .api import admin, auth, demo, flags, graph, guard, imports, integrations, pnl, reports, signals, sunset
 from .config import assert_safe_to_start, config
 from .core.ratelimit import client_address, client_key, limiter, rule_for
 from .db import close_pool, init_pool, org_tx
@@ -78,6 +78,7 @@ app.include_router(pnl.router)
 app.include_router(sunset.router)
 app.include_router(admin.router)
 app.include_router(imports.router)
+app.include_router(signals.router)          # before integrations: /webhooks/signals/...
 app.include_router(integrations.router)
 app.include_router(graph.router)
 app.include_router(guard.router)

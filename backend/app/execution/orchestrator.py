@@ -209,9 +209,21 @@ async def scream_evidence(conn, p, now: datetime | None = None) -> dict[str, Any
                              p["flag_key"], off_at)
     tickets = await conn.fetchval("SELECT count(*) FROM support_tickets WHERE feature_id = $1 AND created_at >= $2",
                                   p["feature_id"], off_at)
+    dmg = await damage_since(conn, p["feature_id"], off_at)
     return {"fully_off_at": off_at.isoformat(), "quiet_days": (now - off_at).days,
             "required_days": p["scream_test_days"], "flag_on_evaluations": int(ev["on_n"]),
-            "flag_off_evaluations": int(ev["off_n"]), "tickets_since_off": int(tickets)}
+            "flag_off_evaluations": int(ev["off_n"]), "tickets_since_off": int(tickets),
+            "errors_since_off": dmg["error"], "deprecated_calls_since_off": dmg["deprecated_call"]}
+
+
+async def damage_since(conn, feature_id, since: datetime) -> dict[str, int]:
+    """Undismissed damage signals (sum of occurrences) per kind for one feature since a moment."""
+    rows = await conn.fetch("""SELECT kind, coalesce(sum(occurrences), 0)::bigint AS n FROM damage_signals
+                                WHERE feature_id = $1 AND occurred_at >= $2 AND dismissed_at IS NULL GROUP BY kind""",
+                            feature_id, since)
+    out = {"error": 0, "deprecated_call": 0}
+    out.update({r["kind"]: int(r["n"]) for r in rows})
+    return out
 
 
 # ------------------------------------------------------------------------------------- cleanup PR
@@ -299,13 +311,16 @@ async def gather_context(conn, org: str, p, body_ctx: dict[str, Any], provider: 
                            "cleanup_pr": p["cleanup_pr"], **body_ctx}
     scream = None
     canary = p["canary"] or {}
+    if p["state"] == SunsetState.CANARY_DARK_LAUNCH.value and not canary.get("fully_off_at") and canary.get("started_at"):
+        ctx["errors_since_canary"] = (await damage_since(conn, p["feature_id"],
+                                                         datetime.fromisoformat(canary["started_at"])))["error"]
     if p["state"] == SunsetState.CANARY_DARK_LAUNCH.value and canary.get("fully_off_at"):
         if p["flag_key"]:
             await ingest_evaluations(conn, org, p["flag_key"], datetime.fromisoformat(canary["fully_off_at"]),
                                      provider or (await providers_for(conn))[0], now)
         scream = await scream_evidence(conn, p, now)
-        ctx["tickets_since_off"] = scream["tickets_since_off"]
-        ctx["flag_on_evaluations"] = scream["flag_on_evaluations"]
+        for k in ("tickets_since_off", "flag_on_evaluations", "errors_since_off", "deprecated_calls_since_off"):
+            ctx[k] = scream[k]
         # the PR is generated on this transition; no hand-made outline is needed first
         ctx["cleanup_pr"] = p["cleanup_pr"] or {"generated_on_transition": True}
     return ctx, scream
@@ -401,12 +416,14 @@ async def scan_canaries(conn, org: str, provider: FlagProvider | None = None,
         if canary.get("fully_off_at"):
             ev = await scream_evidence(conn, p, now)
             seen = canary.get("alerted", {})
-            if (ev["flag_on_evaluations"], ev["tickets_since_off"]) != (seen.get("on", 0), seen.get("tickets", 0)) \
-                    and (ev["flag_on_evaluations"] or ev["tickets_since_off"]):
+            now_seen = {"on": ev["flag_on_evaluations"], "tickets": ev["tickets_since_off"],
+                        "errors": ev["errors_since_off"], "calls": ev["deprecated_calls_since_off"]}
+            if now_seen != {k: seen.get(k, 0) for k in now_seen} and any(now_seen.values()):
                 await conn.execute("UPDATE sunset_plans SET canary = canary || $2 WHERE id = $1", p["id"],
-                                   {"alerted": {"on": ev["flag_on_evaluations"], "tickets": ev["tickets_since_off"]}})
+                                   {"alerted": now_seen})
                 await audit(conn, org, p["id"], p["state"], p["state"], "note",
-                            {"scream_alert": {k: ev[k] for k in ("flag_on_evaluations", "tickets_since_off")}},
+                            {"scream_alert": {k: ev[k] for k in ("flag_on_evaluations", "tickets_since_off",
+                                                                 "errors_since_off", "deprecated_calls_since_off")}},
                             None, system="flag-monitor")
                 item["alert"] = True
             item.update(ev)
