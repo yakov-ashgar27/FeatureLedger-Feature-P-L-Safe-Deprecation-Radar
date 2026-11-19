@@ -14,6 +14,7 @@ const LINKS = [
   { href: "/zombie-guard", label: "Zombie-Guard", sub: "PR bot preview" },
   { href: "/reports", label: "Executive brief", sub: "Digest, Slack, PDF" },
   { href: "/settings", label: "Settings & access", sub: "Rates, users, roles" },
+  { href: "/glossary", label: "Glossary", sub: "What the numbers mean" },
 ];
 
 export function Nav() {

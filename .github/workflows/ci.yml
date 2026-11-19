@@ -215,7 +215,7 @@ jobs:
           curl -fs -H "Authorization: Bearer $TOKEN_ADMIN" "http://localhost:8000/api/v1/triage?status=decided" | python3 -c "import json,sys; assert len(json.load(sys.stdin)['items']) == 1"
       - name: dashboard pages render through the proxy (signed in)
         run: |
-          for p in / /features/legacy-pdf-export /simulator /sunset /mappings /integrations /settings /zombie-guard /reports; do
+          for p in / /features/legacy-pdf-export /simulator /sunset /mappings /integrations /settings /zombie-guard /reports /glossary; do
             curl -fs -H "Cookie: fl_session=$TOKEN_VIEWER" "http://localhost:3000$p" -o /dev/null && echo "ok $p"
           done
           curl -fs -H "Cookie: fl_session=$TOKEN_VIEWER" http://localhost:3000/api/v1/periods

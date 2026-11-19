@@ -18,6 +18,7 @@ import asyncio
 import os
 import re
 import uuid
+from types import SimpleNamespace
 
 import pytest
 
@@ -25,7 +26,6 @@ if os.environ.get("FL_INTEGRATION") != "1":
     pytest.skip("integration suite: set FL_INTEGRATION=1 with a migrated, seeded database", allow_module_level=True)
 
 import asyncpg  # noqa: E402
-from fastapi.routing import APIRoute  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app.auth.session import issue_session  # noqa: E402
@@ -192,10 +192,14 @@ def test_every_route_refuses_a_foreign_tenant(client, tenant_a, tenant_b):
     h = {"Authorization": f"Bearer {tenant_b}"}
     secrets = secrets_of(tenant_a)
     tested, failures = 0, []
-    routes = [r for r in app.routes if isinstance(r, APIRoute) and not PUBLIC_ROUTES.match(r.path)]
-    expected = sum(1 for r in routes for m in r.methods - {"HEAD", "OPTIONS"} if (m, r.path) not in SKIP)
+    # every operation the API publishes (the OpenAPI schema is stable across FastAPI versions; no route is
+    # hidden from it, so a new route is swept automatically)
+    ops = {path: {m.upper() for m in item if m in ("get", "post", "put", "patch", "delete")}
+           for path, item in app.openapi()["paths"].items()}
+    routes = [SimpleNamespace(path=p, methods=ms) for p, ms in ops.items() if not PUBLIC_ROUTES.match(p)]
+    expected = sum(1 for r in routes for m in r.methods if (m, r.path) not in SKIP)
     for route in routes:
-        for method in sorted(route.methods - {"HEAD", "OPTIONS"}):
+        for method in sorted(route.methods):
             if (method, route.path) in SKIP:
                 continue
             params = re.findall(r"{(\w+)(?::[^}]*)?}", route.path)

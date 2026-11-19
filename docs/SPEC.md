@@ -459,8 +459,41 @@ plan is leaving: candidate → `sunset:blast_radius` (PM/TL, admin); blast_radiu
 - **Archived history.** Recompute includes archived features, so their rows and the capacity conservation survive.
   `/pnl` (`include_archived=false` by default), the digest, the radar and the simulator exclude them.
 
+### 13.6 Readiness work (after Phase 5)
+
+- **Tenant isolation, proven by tests** (`tests/test_isolation_api.py`, `0008_partition_isolation.sql`). Every table
+  has forced RLS with a tenant policy; monthly partitions are revoked from the app role and carry their own policy
+  (a policy on a partitioned parent does not apply when a partition is queried directly: this was a real hole);
+  the app role is NOBYPASSRLS and owns nothing; the SECURITY DEFINER functions are an exact, reviewed list with
+  pinned `search_path` and no PUBLIC execute; with no tenant set, every table returns zero rows. Over HTTP, every
+  authenticated route (counted, so a new route cannot be skipped silently) is called with tenant B's session and
+  tenant A's ids; no response may be a 5xx or contain A's ids or emails. This sweep found a route that reached the
+  job queue for another tenant's integration (now a 404 first).
+- **Confidence and coverage** (`app/reports/confidence.py`). Per feature: cost quality is the cost-weighted share of
+  declared (1.0), inferred (0.6) and estimated (0.5) inputs, with engineering capped at 0.85 because hours are modelled
+  from PR size; value stability checks whether net ROI keeps its sign under the usage-weighted and tier-gated models.
+  High: quality ≥ 0.80 and a stable verdict. Low: quality < 0.55, no revenue data, or the verdict flips. Shown as a
+  badge in the ledger and as "Why this number?" (`GET /api/v1/features/{key}/explain`) on each tear-sheet.
+- **Security hardening.** Revocable sessions (`users.session_epoch`, `0009`): sign-out, disabling a user, a role
+  change (also from the IdP) and the admin "sign out everywhere" end every session of that user. Rate limits
+  (`app/core/ratelimit.py`, Redis-shared with an in-memory fallback): sign-in, SSO and demo sessions 30/min per address,
+  webhooks 1200/min, API 1200/min per session, demo reset once per `DEMO_RESET_COOLDOWN_S`. Security headers on the API
+  (deny-all CSP, nosniff, no framing, `Cache-Control: no-store`, HSTS on https) and the dashboard (same-origin CSP,
+  `frame-ancestors 'none'`). External LLM endpoints need `LLM_ALLOW_EXTERNAL=true` as well as a key. CI runs
+  `pip-audit` and `npm audit`.
+- **Damage signals** (`app/core/damage.py`, `0010_damage_signals.sql`). Sentry webhooks and generic HMAC-signed signals
+  (errors, calls to a feature's API routes) are attributed by tag, then route, then stack-frame path. During a sunset,
+  `errors_during_canary` blocks the promote to fully off; `errors_after_off` and `deprecated_route_called` block the
+  cleanup PR. Admins can dismiss a signal as unrelated (kept with who and why).
+- **Onboarding.** `/glossary` and column / badge tooltips in plain language (`web/lib/glossary.ts`); a `features.yaml`
+  draft generator (`python -m app.tools.draft_manifest <repo>`, `make draft-manifest REPO=...`).
+
 ## 14. Not built yet
 
 - Linear, Mixpanel/Amplitude, HubSpot/Salesforce, Intercom and GCP connectors (same contract as the Phase 2 five).
 - GitLab merge requests for cleanup (the change builder is provider-neutral).
 - SCIM user provisioning and KMS-backed token encryption (credentials are read from the environment).
+- Per-tenant webhook secrets for damage signals (one secret per deployment today: fine single-tenant, not for hosting
+  several companies on one deployment).
+- An external penetration test, and operational pieces that depend on where it is hosted: managed secrets,
+  database backups with tested restores, alerting, multiple API workers behind a load balancer.

@@ -210,6 +210,20 @@ With `SANDBOX_MODE=false` the API, the worker and the migrations **refuse to sta
 | Zombie-Guard | the same GitHub webhook with *Pull requests* events; `GITHUB_TOKEN` (read) to list PR files; `GITHUB_COMMENT_TOKEN` (Pull requests: write) to comment |
 | Executive digest | `SLACK_WEBHOOK_URL`, `SANDBOX_MODE=false` |
 | Public demo | `DEMO_MODE=true` only on a deployment meant for visitors; `false` wherever real data lives |
+| Damage signals | `SENTRY_CLIENT_SECRET` (Sentry internal integration → `/api/v1/webhooks/signals/sentry/<org>`) and/or `SIGNALS_WEBHOOK_SECRET` (gateway / logs → `/api/v1/webhooks/signals/generic/<org>`) |
+| Behind a proxy | `TRUSTED_PROXY_HOPS` (1 = the dashboard, 2 = a load balancer in front of it); keep the API port private |
+| LLM (optional) | `LLM_API_KEY` **and** `LLM_ALLOW_EXTERNAL=true`; without the second, ticket and PR text never leaves the deployment |
+
+### What has been checked, and what has not
+
+- **Tenant isolation**: catalog checks (forced RLS on every table and partition, an exact list of privileged
+  functions) and an HTTP sweep of every authenticated route with another tenant's ids. See SPEC §13.6.
+- **How sure each number is**: a confidence badge per feature and "Why this number?" on each tear-sheet.
+  On the seed data every feature rates High: the seed is cleaner than real data will be.
+- **Security**: revocable sessions, rate limits, security headers, explicit consent for external LLMs, dependency audit in CI.
+- **Safe removal**: production errors and calls to retired routes block a sunset, next to tickets and flag evaluations.
+- **Not yet**: an external penetration test, per-tenant webhook secrets, and the hosting work (managed secrets,
+  backups, alerting, several API workers). The numbers are an allocation model, not accounting.
 
 ## Earlier phases in one paragraph each
 
@@ -289,7 +303,8 @@ CI (`.github/workflows/ci.yml`) runs three jobs:
 
 ### Use your own data
 
-1. Describe your teams and features in `features.yaml`.
+1. Describe your teams and features in `features.yaml`. To start from a draft of your own code:
+   `make draft-manifest REPO=../your-repo` writes `features.draft.yaml` (read-only; nothing leaves your machine).
 2. In `.env`, set `SEED_ON_START=false`, `DEFAULT_ORG_SLUG`, `ORG_NAME`, and either SSO or `FL_API_TOKEN`.
 3. Run `docker compose down -v && docker compose up --build -d`.
 4. Import CSVs from `templates/`: `make import KIND=accounts FILE=accounts.csv PERIOD=2026-10`. Do the same for `usage`, `tickets` and `costs`, then run `make pnl`.

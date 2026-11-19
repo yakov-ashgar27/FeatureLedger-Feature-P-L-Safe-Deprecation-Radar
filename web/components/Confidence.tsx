@@ -55,6 +55,7 @@ export function WhyThisNumber({ featureKey }: { featureKey: string }) {
       <p className="text-[11px] text-ink-3">
         Net by model: usage-weighted {usd(c.net_by_model.usage_weighted)}, tier-gated {usd(c.net_by_model.tier_gated)}.
         A feature P&amp;L is an allocation model, not accounting: use it to rank and question features, then confirm with the team.
+        {" "}<a href="/glossary#confidence" className="underline">What the levels mean</a>
       </p>
     </div>
   );

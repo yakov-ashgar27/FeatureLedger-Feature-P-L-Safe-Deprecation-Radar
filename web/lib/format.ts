@@ -17,13 +17,13 @@ export const num = (v: number | null | undefined, digits = 0) =>
   v == null ? "—" : v.toLocaleString("en-US", { maximumFractionDigits: digits, minimumFractionDigits: digits });
 
 export const CLASS_META: Record<FeatureClass, { label: string; dot: string; hint: string }> = {
-  cash_cow: { label: "Cash Cow", dot: "bg-cow", hint: "High value, manageable cost" },
-  zombie: { label: "Zombie", dot: "bg-zombie", hint: "Low usage, negative ROI, high bug tax: sunset candidate" },
-  niche_anchor: { label: "Niche Anchor", dot: "bg-anchor", hint: "Low adoption but a high-ARR account depends on it" },
-  growth_bet: { label: "Growth Bet", dot: "bg-other", hint: "Investing ahead of value, adoption rising" },
-  watch: { label: "Watch", dot: "bg-other", hint: "No rule triggered" },
-  mandated: { label: "Mandated", dot: "bg-other", hint: "Regulatory: exempt from sunset" },
-  platform: { label: "Platform", dot: "bg-other", hint: "Shared overhead" },
+  cash_cow: { label: "Cash Cow", dot: "bg-cow", hint: "Earns well above what it costs" },
+  zombie: { label: "Zombie", dot: "bg-zombie", hint: "Little used, loses money, costs real effort: a candidate to retire (a question, not a verdict)" },
+  niche_anchor: { label: "Niche Anchor", dot: "bg-anchor", hint: "Few use it, but a high-value account depends on it: do not remove blindly" },
+  growth_bet: { label: "Growth Bet", dot: "bg-other", hint: "New or growing fast; still costs more than it earns" },
+  watch: { label: "Watch", dot: "bg-other", hint: "No rule fired: nothing to do now" },
+  mandated: { label: "Mandated", dot: "bg-other", hint: "Required for regulatory reasons: never offered for retirement" },
+  platform: { label: "Platform", dot: "bg-other", hint: "Shared infrastructure every feature relies on: costs, no revenue by design" },
 };
 
 export const STATE_LABEL: Record<string, string> = {

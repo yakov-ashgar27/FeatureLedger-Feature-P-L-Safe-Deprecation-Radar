@@ -1,4 +1,4 @@
-.PHONY: up down reset test seed-sql logs sync-github import apply-manifest pnl token e2e
+.PHONY: up down reset test seed-sql logs sync-github import apply-manifest pnl token e2e draft-manifest
 comma := ,
 
 # Every API call needs a session (Phase 4). FL_API_TOKEN from .env if set (service admin), otherwise a
@@ -23,6 +23,12 @@ test:          ## backend unit + end-to-end engine tests (no database needed)
 
 seed-sql:      ## write the deterministic seed as plain SQL
 	cd backend && python -m app.seed.generate --manifest ../features.yaml --out ../db/seed.sql
+
+draft-manifest: ## draft features.yaml from a local checkout: make draft-manifest REPO=../my-repo (writes features.draft.yaml)
+	@test -n "$(REPO)" || (echo "usage: make draft-manifest REPO=/path/to/your/repo" && exit 2)
+	docker compose run --rm --no-deps -T -v "$(abspath $(REPO))":/repo:ro api \
+		python -m app.tools.draft_manifest /repo > features.draft.yaml
+	@echo "-> features.draft.yaml: review it, then copy what is right into features.yaml"
 
 sync-github:   ## ingest a real repo: make sync-github REPO=owner/name [TEAM=team-key]
 	curl -s -X POST localhost:8000/api/v1/integrations/github/sync $(AUTH) -H 'Content-Type: application/json' \

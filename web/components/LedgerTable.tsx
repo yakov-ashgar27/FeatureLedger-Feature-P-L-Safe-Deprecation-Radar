@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { hint } from "@/lib/glossary";
 import { ConfidenceBadge } from "@/components/Confidence";
 import { MarginBleedBadge } from "@/components/TokenBleed";
 import { useMemo, useState } from "react";
@@ -48,7 +49,7 @@ export function LedgerTable({ rows }: { rows: LedgerRow[] }) {
   }, [rows]);
 
   const head = (key: keyof LedgerRow, label: string, right = false) => (
-    <th className={`cursor-pointer select-none px-3 py-2.5 ${right ? "text-right" : ""}`}
+    <th className={`cursor-pointer select-none px-3 py-2.5 ${right ? "text-right" : ""}`} title={hint(String(key))}
       onClick={() => setSort((s) => ({ key, dir: s.key === key ? (s.dir === 1 ? -1 : 1) : -1 }))}>
       {label}{sort.key === key ? (sort.dir === 1 ? " ↑" : " ↓") : ""}
     </th>
