@@ -120,6 +120,7 @@ async def trigger_sync(integration_id: str, org: str = Depends(org_for("integrat
 @router.get("/integrations/{integration_id}/dead-letters")
 async def dead_letters(integration_id: str, org: str = Depends(current_org)):
     async with org_tx(org) as conn:
+        await _integration(conn, integration_id)
         rows = await conn.fetch("""SELECT idempotency_key, entity_type, external_id, attempts, last_error, received_at,
                                           dead_lettered_at FROM ingest_inbox
                                     WHERE integration_id = $1 AND dead_lettered_at IS NOT NULL
@@ -130,11 +131,13 @@ async def dead_letters(integration_id: str, org: str = Depends(current_org)):
 @router.post("/integrations/{integration_id}/dead-letters/retry")
 async def retry_dead_letters(integration_id: str, org: str = Depends(org_for("integrations:manage"))):
     async with org_tx(org) as conn:
+        await _integration(conn, integration_id)
         n = await conn.fetchval("""WITH x AS (UPDATE ingest_inbox SET dead_lettered_at = NULL, attempts = 0, last_error = NULL
                                     WHERE integration_id = $1 AND dead_lettered_at IS NOT NULL RETURNING 1)
                                     SELECT count(*) FROM x""", integration_id)
-    q = await _queue()
-    await q.enqueue_job("process_job", org, _job_id=f"process:{org}")
+    if n:
+        q = await _queue()
+        await q.enqueue_job("process_job", org, _job_id=f"process:{org}")
     return {"requeued": n}
 
 
