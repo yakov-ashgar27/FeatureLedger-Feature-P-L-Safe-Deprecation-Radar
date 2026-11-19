@@ -14,6 +14,7 @@ from ..connectors.ratelimit import MemoryBucketStore
 from ..connectors.registry import build, live_configured
 from ..connectors.runner import write_envelopes
 from ..db import org_tx
+from ..guard.zombie_guard import GUARD_ACTIONS
 from .deps import current_org, org_for, row
 
 router = APIRouter(prefix="/api/v1", tags=["integrations"])
@@ -194,11 +195,30 @@ async def _github_webhook(i: dict[str, Any], request: Request, body: bytes, org:
             "results": res.results}
 
 
+async def _zombie_guard(payload: dict[str, Any], org: str) -> dict[str, Any]:
+    """Phase 5: comment once (and keep the comment current) on PRs touching zombie / retiring features."""
+    from ..db import org_is_demo
+    from ..guard.providers import CommentProviderError, FilesError, get_comment_provider, pr_files
+    from ..guard.zombie_guard import handle_pull_request
+    try:
+        paths = await pr_files(payload)
+    except FilesError as e:
+        return {"zombie_guard": "skipped", "reason": str(e)}
+    async with org_tx(org) as conn:
+        demo = await org_is_demo(conn)
+        try:
+            return await handle_pull_request(conn, org, payload, get_comment_provider(demo), paths)
+        except CommentProviderError as e:   # a comment must never fail GitHub's webhook delivery
+            return {"zombie_guard": "failed", "reason": str(e)}
+
+
 async def _github_pull_request(payload: dict[str, Any], org: str) -> dict[str, Any]:
     """Phase 4: a merged cleanup PR (head branch sunset/<feature_key>) archives its sunset plan."""
     from ..execution.orchestrator import handle_pr_merged
     pr = payload.get("pull_request") or {}
     head = (pr.get("head") or {}).get("ref", "")
+    if payload.get("action") in GUARD_ACTIONS:
+        return {"event": "pull_request", **await _zombie_guard(payload, org)}
     if payload.get("action") != "closed" or not head.startswith("sunset/"):
         return {"event": "pull_request", "ignored": True, "reason": "not a closed sunset/* PR"}
     repo = (payload.get("repository") or {}).get("full_name") or ""

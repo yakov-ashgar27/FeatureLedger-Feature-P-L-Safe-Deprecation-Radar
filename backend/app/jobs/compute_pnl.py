@@ -36,6 +36,9 @@ async def load_dataset(conn: asyncpg.Connection, months: list[date]) -> Dataset:
         calibration_clamp_max=_f(s["calibration_clamp_max"]), critical_concentration=_f(s["critical_concentration"]),
         anchor_min_arr_usd=_f(s["anchor_min_arr_usd"]),
         tier_uplift_share={k: float(v) for k, v in (s["tier_uplift_share"] or {}).items()},
+        **({"margin_bleed_min_adoption": _f(s["margin_bleed_min_adoption"]),
+            "margin_bleed_max_gross_margin": _f(s["margin_bleed_max_gross_margin"])}
+           if "margin_bleed_min_adoption" in s.keys() else {}),
     ) if s else OrgSettings()
     teams = [Team(str(r["id"]), r["key"], r["name"], r["headcount"])
              for r in await conn.fetch("SELECT id, key, name, headcount FROM teams")]
@@ -90,13 +93,17 @@ async def write_result(conn: asyncpg.Connection, org_id: str, res: PnlResult, ds
     await conn.executemany("""
         INSERT INTO feature_pnl_monthly (org_id, feature_id, period_month, eng_hours, bug_hours, c_eng, c_support,
             c_infra, c_total, c_overhead_alloc, v_usage, v_tier, revenue_at_risk_arr, tickets, active_accounts,
-            eligible_accounts, anchor_accounts, bug_tax_ratio, classification, classification_reason, model_version)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::feature_class,$20,$21)""", [
+            eligible_accounts, anchor_accounts, bug_tax_ratio, classification, classification_reason, model_version,
+            c_ai_tokens, gross_margin_pct, margin_bleed, margin_bleed_reason, ai_tier_breakdown)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::feature_class,$20,$21,
+                $22,$23,$24,$25,$26)""", [
         (org_id, r.feature_id, m, round(r.eng_hours, 2), round(r.bug_hours, 2), round(r.c_eng, 2),
          round(r.c_support, 2), round(r.c_infra, 2), round(r.c_total, 2), round(r.c_overhead_alloc, 2),
          round(r.v_usage, 2), round(r.v_tier, 2), round(r.revenue_at_risk_arr, 2), r.tickets, r.active_accounts,
          r.eligible_accounts, r.anchor_accounts, round(min(r.bug_tax_ratio, 1.0), 4), r.classification.value,
-         r.classification_reason, MODEL_VERSION)
+         r.classification_reason, MODEL_VERSION, round(r.c_ai_tokens, 2),
+         round(max(min(r.gross_margin_pct, 999999.0), -999999.0), 4), r.margin_bleed, r.margin_bleed_reason,
+         r.ai_tier_breakdown)
         for (m, _), r in res.rows.items()])
     model_costs = []
     for (m, _), r in res.rows.items():
@@ -139,7 +146,8 @@ async def recompute(conn: asyncpg.Connection, org_id: str, months: list[date] | 
     counts: dict[str, int] = defaultdict(int)
     for r in res.month_rows(last):
         counts[r.classification.value] += 1
-    return {"months": len(months), "features": len(ds.features), "work_items": len(ds.work_items),
+    bleed = sorted(r.feature_key for r in res.month_rows(last) if r.margin_bleed)
+    return {"months": len(months), "features": len(ds.features), "work_items": len(ds.work_items), "margin_bleed": bleed,
             "latest": last.isoformat(), "classes": dict(counts), "model_version": MODEL_VERSION}
 
 

@@ -4,11 +4,12 @@ import { useState } from "react";
 import { usd, usdShort } from "@/lib/format";
 import type { PnlMonth } from "@/lib/types";
 
-// Three stacked cost parts use categorical slots 1-3; attributed value is a dark ink line on the same $ axis.
+// Four stacked cost parts use categorical slots 1-4; attributed value is a dark ink line on the same $ axis.
 const PARTS = [
   { key: "c_eng", label: "Engineering", color: "#2a78d6" },
   { key: "c_support", label: "Support", color: "#eb6834" },
-  { key: "c_infra", label: "Infra + AI", color: "#1baf7a" },
+  { key: "c_infra", label: "Cloud infra", color: "#1baf7a" },
+  { key: "c_ai_tokens", label: "AI tokens", color: "#eda100" },
 ] as const;
 const W = 720, H = 260, M = { l: 56, r: 16, t: 12, b: 28 };
 

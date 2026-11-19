@@ -74,3 +74,8 @@ async def integration_org(integration_id: str) -> str | None:
         except asyncpg.DataError:
             return None
     return str(v) if v else None
+
+
+async def org_is_demo(conn) -> bool:
+    """Inside an org transaction: is this tenant the live-demo org? (Demo orgs never touch real vendors.)"""
+    return bool(await conn.fetchval("SELECT coalesce(bool_or(is_demo), false) FROM organizations"))

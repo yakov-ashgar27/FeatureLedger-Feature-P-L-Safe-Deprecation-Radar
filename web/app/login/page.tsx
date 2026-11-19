@@ -4,7 +4,7 @@ import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { ROLE_LABEL } from "@/components/Auth";
 import { apiGet, apiPost } from "@/lib/api";
-import type { AuthConfig, Role } from "@/lib/types";
+import type { AuthConfig, DemoStatus, Role } from "@/lib/types";
 
 const ROLE_HINT: Record<Role, string> = {
   viewer: "Read-only: P&L, tear-sheets, simulator",
@@ -24,7 +24,18 @@ function Login() {
   const [err, setErr] = useState<string | null>(sp?.get("error") ?? null);
   const [busy, setBusy] = useState<string | null>(null);
 
-  useEffect(() => { apiGet<AuthConfig>("/api/v1/auth/config").then(setCfg).catch((e) => setErr(e.message)); }, []);
+  const [demo, setDemo] = useState<DemoStatus | null>(null);
+  useEffect(() => {
+    apiGet<AuthConfig>("/api/v1/auth/config").then(setCfg).catch((e) => setErr(e.message));
+    apiGet<DemoStatus>("/api/v1/demo/status").then(setDemo).catch(() => undefined);
+  }, []);
+  const launch = async () => {
+    setBusy("demo"); setErr(null);
+    try {
+      await apiPost("/api/v1/demo/launch", { role: "pm_tech_lead" });
+      window.location.href = "/";
+    } catch (e) { setErr((e as Error).message); setBusy(null); }
+  };
 
   const safeNext = next.startsWith("/") && !next.startsWith("//") ? next : "/";
   const dev = async (role: Role) => {
@@ -43,6 +54,17 @@ function Login() {
           <div className="text-sm text-ink-3">Feature-level P&amp;L and Safe Deprecation Radar</div>
         </div>
         {err && <div className="mb-4 rounded-md border border-[#f1c3b0] bg-[#fdf3ee] px-3 py-2 text-sm text-[#8a3413]">{err}</div>}
+        {demo?.enabled && (
+          <div className="mb-6">
+            <button className="btn-primary w-full py-3 text-base" disabled={!!busy || !demo.ready} onClick={launch} data-testid="launch-demo">
+              {busy === "demo" ? "Opening the demo…" : demo.label}
+            </button>
+            <p className="mt-2 text-xs text-ink-3">
+              No sign-up. You land as a PM / Tech lead in an isolated sample company and can switch roles from the banner.
+              {!demo.ready && " The demo is still being prepared; refresh in a few seconds."}
+            </p>
+          </div>
+        )}
         {cfg?.oidc.enabled && (
           <a className="btn-primary block w-full text-center" href={`/api/v1/auth/oidc/login?next=${encodeURIComponent(safeNext)}`}>
             Sign in with {cfg.oidc.label}

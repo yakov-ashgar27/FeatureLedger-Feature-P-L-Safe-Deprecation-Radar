@@ -56,9 +56,13 @@ class Principal:
     def can(self, permission: str) -> bool:
         return can(self.role, permission)
 
+    @property
+    def is_demo(self) -> bool:
+        return self.org_slug == config.demo_org_slug and config.demo_mode
+
     def public(self) -> dict[str, Any]:
         return {"id": self.user_id, "email": self.email, "name": self.name, "role": self.role.value,
-                "kind": self.kind, "org": {"id": self.org_id, "slug": self.org_slug},
+                "kind": self.kind, "org": {"id": self.org_id, "slug": self.org_slug}, "demo": self.is_demo,
                 "permissions": permissions_for(self.role)}
 
     def audit(self) -> dict[str, Any]:

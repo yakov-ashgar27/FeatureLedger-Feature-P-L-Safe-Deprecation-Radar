@@ -99,6 +99,35 @@ async def flag_evaluations_job(ctx: dict) -> dict:
     return out
 
 
+async def monthly_digest_job(ctx: dict) -> dict:
+    """Phase 5: on the 1st, build, store and post the executive digest for the month that just ended."""
+    from datetime import date, datetime, timezone
+
+    from .db import org_is_demo
+    from .reports.digest import build_digest, post_to_slack, previous_month, slack_blocks
+    today = datetime.now(timezone.utc).date()
+    period = previous_month(date(today.year, today.month, 1))
+    pool = await init_pool()
+    async with pool.acquire() as conn:
+        orgs = [str(r["org_id"]) for r in await conn.fetch("SELECT org_id FROM list_orgs()")]
+    out: dict[str, Any] = {}
+    for org in orgs:
+        async with org_tx(org) as conn:
+            if await org_is_demo(conn):
+                continue
+            d = await build_digest(conn, period)
+            if d["ledger_period"] is None:
+                continue
+            blocks = slack_blocks(d)
+            status, err = await post_to_slack(blocks, demo=False)
+            await conn.execute("""
+                INSERT INTO executive_digests (org_id, period_month, trigger, summary, slack_blocks, slack_status, slack_error)
+                VALUES ($1, $2, 'schedule', $3, $4, $5, $6)""", org, period, d, blocks, status, err)
+            out[org] = status
+    log.info("executive digest %s: %s", period.isoformat()[:7], out)
+    return out
+
+
 async def schedule_due_syncs(ctx: dict) -> dict:
     due: dict[str, list[str]] = {}
     for t in await _targets():
@@ -125,7 +154,8 @@ class WorkerSettings:
                  func(graph_job, keep_result=0, timeout=900, max_tries=1)]
     cron_jobs = [cron(schedule_due_syncs, minute={0, 15, 30, 45}, run_at_startup=True),
                  cron(hourly_graph, minute=7),
-                 cron(flag_evaluations_job, minute={5, 20, 35, 50}, run_at_startup=True)]
+                 cron(flag_evaluations_job, minute={5, 20, 35, 50}, run_at_startup=True),
+                 cron(monthly_digest_job, day=1, hour=6, minute=11)]
     on_startup = startup
     on_shutdown = shutdown
     max_jobs = 4

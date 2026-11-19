@@ -1,4 +1,4 @@
-# FeatureLedger: specification (as built, Phases 1–4)
+# FeatureLedger: specification (as built, Phases 1–5)
 
 This document describes what the code in this repository does, and why. Every formula below has
 a unit test in `backend/tests/`, and the section numbers are referenced from code comments.
@@ -392,7 +392,64 @@ plan is leaving: candidate → `sunset:blast_radius` (PM/TL, admin); blast_radiu
 (desired state per flag, keep-on list, provider reference), `flag_evaluations` (hourly or daily buckets per source),
 `cleanup_pull_requests`. `sunset_plans.rollback_count`.
 
-## 13. Not built yet
+## 13. Phase 5: differentiators
+
+### 13.1 AI gross margin
+
+- `C_ai` = cost lines of type `llm` (variable AI/LLM tokens); `C_infra` = every other tagged cloud cost.
+  `C_total = C_eng + C_support + C_infra + C_ai`, so totals are unchanged from Phase 4.
+- `GM% = (V_usage − C_ai − C_infra) / max(V_usage, 1)`.
+- **Tier split:** `C_ai` is spread over plan tiers in proportion to usage events. Each tier also carries the
+  usage-weighted revenue attributed to its active accounts.
+- **`margin_bleed`** is set when all of these hold:
+  - adoption > `margin_bleed_min_adoption` (0.15) and GM% < `margin_bleed_max_gross_margin` (0.20);
+  - `C_ai ≥ C_infra` and `C_ai > 0`;
+  - the feature is not shared overhead.
+
+  It is a flag next to the health class and never changes the class.
+- **Columns:** `feature_pnl_monthly.c_ai_tokens`, `gross_margin_pct`, `margin_bleed`, `margin_bleed_reason`,
+  `ai_tier_breakdown`.
+
+### 13.2 Zombie-Guard
+
+| Step | Rule |
+| --- | --- |
+| Trigger | GitHub `pull_request` with action `opened`, `synchronize`, `reopened` or `ready_for_review` |
+| Files | `GET /repos/{repo}/pulls/{n}/files` (paged, ≤ 3000; renamed files count under both names) |
+| Owner | `EffectiveResolver.owner(path)`: human > manifest > auto-confirmed ≥ 0.80 |
+| Flagged | latest class `zombie`, or a live sunset plan, or feature status `archived` |
+| Skipped | head ref `sunset/*` or a row in `cleanup_pull_requests` |
+| Idempotency | `pr_guard_comments` (one row per repo + PR); `body_sha` ignores the footer line (head sha, file count), so a push that changes no fact edits nothing; a marker comment is searched before creating one |
+| Never | a status check, a review request, or a blocking label |
+
+### 13.3 Executive digest
+
+- **Period:** a calendar month. The scheduled run on day 1 at 06:11 UTC reports the previous month; a manual run defaults to the current month.
+- **Zombie tax outstanding:** trailing-3-month average cost and hours of the latest zombies. FTE = hours / (`hours_per_engineer_month` × `allocatable_fraction`).
+- **Reclaimed:** plans whose archive time falls in the period. At archive, `sunset_plans.reclaimed` freezes the trailing-3-month averages, because archived features leave the ledger.
+- **Bleed:** `max(C_total − V, C_ai + C_infra − (1 − target GM) × V)`. The top 3 always include a `margin_bleed` feature when one exists.
+- **Data health:** six checks (connectors, dead letters, unmapped hours ≤ 10%, triage queue ≤ 25, untagged spend ≤ 25%, ≥ 3 months of history) → healthy / attention / poor.
+- **Slack:** Block Kit to `SLACK_WEBHOOK_URL`. Status is `dry_run` in `SANDBOX_MODE` or in a demo org, and `skipped` without a URL. Every run is stored in `executive_digests`.
+
+### 13.4 Live demo
+
+- `organizations.is_demo`. The demo tenant is the seed company re-keyed with `uuid5(DEMO_NS, seed_id)`:
+  - slug `acme-demo`, name *Acme Cloud*, emails `@acme-cloud.demo`, repo `acme/app`;
+  - every cost line belongs to the sandbox AWS Cost Explorer, so a sync rebuilds them instead of adding to them.
+- **Reset** (admin connection, one transaction behind an advisory lock):
+  1. delete the org's audit rows (allowed only through `featureledger.purge_org`, for an `is_demo` org, by a role other than `featureledger_app`);
+  2. delete the org (cascade);
+  3. run the re-keyed seed SQL;
+  4. mark the integrations sandbox;
+  5. recompute the P&L.
+- **Who can do what:**
+  - `launch` is public while `DEMO_MODE=true`;
+  - `switch-role` needs a demo session;
+  - `reset` needs a demo session or the service token;
+  - user edits and the real GitHub sync are refused in the demo.
+- **Providers:** `orchestrator.providers_for` and `org_is_demo` force the sandbox flag, GitHub, comment and Slack providers for the demo org.
+
+## 14. Not built yet
 
 - Linear, Mixpanel/Amplitude, HubSpot/Salesforce, Intercom and GCP connectors (same contract as the Phase 2 five).
 - GitLab merge requests for cleanup (the change builder is provider-neutral).

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { CostTrend } from "@/components/CostTrend";
+import { MarginBleedBadge, TierBars } from "@/components/TokenBleed";
 import { StartSunset } from "@/components/StartSunset";
 import { ClassBadge, ErrorBox, Kpi, SectionTitle } from "@/components/ui";
 import { serverLoad } from "@/lib/server";
@@ -27,6 +28,7 @@ export default async function FeaturePage({ params }: { params: Promise<{ key: s
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-semibold tracking-tight">{f.name}</h1>
             {cur && <ClassBadge value={cur.classification} />}
+            {cur?.margin_bleed && <MarginBleedBadge reason={cur.margin_bleed_reason} />}
           </div>
           <p className="mt-1 text-sm text-ink-3">
             {f.team} · <code className="text-xs">{f.key}</code>
@@ -58,6 +60,39 @@ export default async function FeaturePage({ params }: { params: Promise<{ key: s
             sub={`${cur.active_accounts} of ${cur.eligible_accounts} eligible paying accounts${first && first !== cur ? ` (was ${first.active_accounts})` : ""}`} />
           <Kpi label="ARR at risk if removed" value={usdShort(cur.revenue_at_risk_arr)}
             sub={`${cur.anchor_accounts} anchor account(s) · bug tax ${pct(cur.bug_tax_ratio, 0)}`} />
+        </section>
+      )}
+
+      {cur && d.history.some((h) => h.c_ai_tokens > 0) && (
+        <section className="card p-5" data-testid="ai-margin">
+          <SectionTitle title="AI gross margin"
+            sub="Variable AI/LLM token spend and fixed cloud infra against attributed revenue. Gross margin = (value − AI tokens − infra) / value." />
+          <div className="grid gap-6 lg:grid-cols-2">
+            <div>
+              <div className="grid grid-cols-3 gap-3">
+                <Kpi label="AI tokens / mo" value={usdShort(cur.c_ai_tokens)} sub={`${pct(cur.c_ai_tokens / Math.max(cur.v_usage, 1), 0)} of value`} />
+                <Kpi label="Cloud infra / mo" value={usdShort(cur.c_infra)} sub="fixed" />
+                <Kpi label="Gross margin" value={pct(cur.gross_margin_pct, 0)} tone={cur.margin_bleed ? "bad" : undefined}
+                  sub={cur.margin_bleed ? "margin bleed" : "healthy"} />
+              </div>
+              {cur.margin_bleed_reason && <p className="mt-3 text-sm text-ink-2">{cur.margin_bleed_reason}</p>}
+              <table className="mt-4 w-full text-xs">
+                <thead><tr className="text-left text-ink-3"><th className="py-1">Month</th><th className="text-right">Tokens</th><th className="text-right">Value</th><th className="text-right">Gross margin</th></tr></thead>
+                <tbody>{d.history.map((h) => (
+                  <tr key={h.period_month} className="border-t border-rule">
+                    <td className="py-1">{h.period_month.slice(0, 7)}</td>
+                    <td className="num text-right">{usdShort(h.c_ai_tokens)}</td>
+                    <td className="num text-right">{usdShort(h.v_usage)}</td>
+                    <td className={`num text-right ${h.margin_bleed ? "font-medium text-[#b4471c]" : ""}`}>{pct(h.gross_margin_pct, 0)}</td>
+                  </tr>))}</tbody>
+              </table>
+            </div>
+            <div>
+              <div className="label mb-2">Token burn vs. revenue by plan tier (latest month)</div>
+              <TierBars tiers={cur.ai_tier_breakdown ?? {}} />
+              <p className="mt-3 text-[11px] text-ink-3">Tokens are spread over tiers by usage events; revenue is the usage-weighted attribution.</p>
+            </div>
+          </div>
         </section>
       )}
 

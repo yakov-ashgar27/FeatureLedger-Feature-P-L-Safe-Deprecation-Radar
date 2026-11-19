@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { MeProvider } from "@/components/Auth";
+import { DemoBanner } from "@/components/DemoBanner";
 import { Nav } from "@/components/Nav";
 import { currentUser } from "@/lib/server";
 
@@ -20,7 +21,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           {me ? (
             <div className="flex min-h-screen">
               <Nav />
-              <main className="min-w-0 flex-1 px-8 py-7">{children}</main>
+              <div className="min-w-0 flex-1">
+                <DemoBanner />
+                <main className="px-8 py-7 print:p-0">{children}</main>
+              </div>
             </div>
           ) : (
             <main className="min-h-screen">{children}</main>

@@ -82,6 +82,10 @@ async def ledger(period: str | None = None, model: Model = "usage_weighted",
             "eng_hours": round(avg("eng_hours"), 1), "c_eng": round(avg("c_eng"), 2),
             "c_support": round(avg("c_support"), 2), "c_infra": round(avg("c_infra"), 2),
             "c_overhead_alloc": round(avg("c_overhead_alloc"), 2), "c_total": round(c_total, 2),
+            "c_ai_tokens": round(avg("c_ai_tokens"), 2),
+            "gross_margin_pct": round((avg("v_usage") - avg("c_ai_tokens") - avg("c_infra")) / max(avg("v_usage"), 1.0), 4),
+            "margin_bleed": bool(cur["margin_bleed"]), "margin_bleed_reason": cur["margin_bleed_reason"],
+            "ai_tier_breakdown": cur["ai_tier_breakdown"] or {},
             "value": round(value, 2), "net_roi": round(value - c_total, 2),
             "efficiency": round(value / max(c_total, 1.0), 3),
             "adoption": round(cur["active_accounts"] / cur["eligible_accounts"], 4) if cur["eligible_accounts"] else 0,
@@ -103,6 +107,9 @@ async def ledger(period: str | None = None, model: Model = "usage_weighted",
             "zombie_count": len(zombies),
             "zombie_tax_month": round(sum(x["c_total"] for x in zombies), 2),
             "zombie_eng_hours_month": round(sum(x["eng_hours"] for x in zombies), 1),
+            "ai_token_spend_month": round(sum(x["c_ai_tokens"] for x in product), 2),
+            "margin_bleed_count": sum(1 for x in product if x["margin_bleed"]),
+            "margin_bleed_features": [x["key"] for x in product if x["margin_bleed"]],
             "untagged_infra_month": float(untagged),
             "eng_capacity_hours": plain(cap["cap"]), "unmapped_eng_hours": plain(cap["unmapped"]),
             "unattributed_eng_hours": plain(cap["unattributed"]),
@@ -196,7 +203,7 @@ async def what_if(body: SimulateIn, org: str = Depends(current_org)):
         by_key[r["key"]].append(FeaturePnl(
             str(r["feature_id"]), r["key"], r["period_month"], eng_hours=float(r["eng_hours"]),
             c_eng=float(r["c_eng"]), c_support=float(r["c_support"]), c_infra=float(r["c_infra"]),
-            v_usage=float(r["v_usage"])))
+            c_ai_tokens=float(r["c_ai_tokens"]), v_usage=float(r["v_usage"])))
     result = simulate(by_key, [(str(e["account_id"]), e["name"], float(e["arr"]), float(e["risk"]), e["key"])
                                for e in exp], ds.settings, body.migration_success, body.one_off_migration_cost)
     result["period"] = end.isoformat()[:7]
@@ -219,3 +226,33 @@ async def teams(org: str = Depends(current_org)):
 @router.get("/models")
 async def models():
     return [m.value for m in AttributionModel]
+
+
+@router.get("/ai-margin")
+async def ai_margin(months: int = Query(6, ge=1, le=24), org: str = Depends(current_org)):
+    """Token-Bleed Radar: every feature with LLM spend, its gross margin trend, and token burn vs revenue by tier."""
+    async with org_tx(org) as conn:
+        rows = await conn.fetch("""
+            SELECT f.key, f.name, f.tier_gate, p.period_month, p.v_usage, p.c_ai_tokens, p.c_infra, p.c_total,
+                   p.gross_margin_pct, p.margin_bleed, p.margin_bleed_reason, p.ai_tier_breakdown,
+                   p.active_accounts, p.eligible_accounts, p.classification::text AS classification
+              FROM feature_pnl_monthly p JOIN features f ON f.id = p.feature_id
+             WHERE p.feature_id IN (SELECT feature_id FROM feature_pnl_monthly WHERE c_ai_tokens > 0)
+               AND p.period_month > (SELECT max(period_month) FROM feature_pnl_monthly) - make_interval(months => $1)
+             ORDER BY f.key, p.period_month""", months)
+        thresholds = await conn.fetchrow("""SELECT margin_bleed_min_adoption, margin_bleed_max_gross_margin
+                                              FROM org_settings""")
+    out: dict[str, dict] = {}
+    for r in rows:
+        d = out.setdefault(r["key"], {"key": r["key"], "name": r["name"], "tier_gate": r["tier_gate"], "history": []})
+        d["history"].append({"period": r["period_month"].isoformat()[:7], "v_usage": plain(r["v_usage"]),
+                             "c_ai_tokens": plain(r["c_ai_tokens"]), "c_infra": plain(r["c_infra"]),
+                             "gross_margin_pct": plain(r["gross_margin_pct"]), "margin_bleed": r["margin_bleed"],
+                             "adoption": round(r["active_accounts"] / r["eligible_accounts"], 4)
+                             if r["eligible_accounts"] else 0})
+        d.update(classification=r["classification"], margin_bleed=r["margin_bleed"],
+                 margin_bleed_reason=r["margin_bleed_reason"], tiers=r["ai_tier_breakdown"] or {})
+    feats = sorted(out.values(), key=lambda d: (not d["margin_bleed"], -(d["history"][-1]["c_ai_tokens"] or 0)))
+    return {"thresholds": {"min_adoption": plain(thresholds["margin_bleed_min_adoption"]) if thresholds else 0.15,
+                           "max_gross_margin": plain(thresholds["margin_bleed_max_gross_margin"]) if thresholds else 0.2},
+            "features": feats}

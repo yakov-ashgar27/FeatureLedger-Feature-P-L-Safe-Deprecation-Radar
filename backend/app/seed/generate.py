@@ -71,7 +71,7 @@ PROFILES: dict[str, Profile] = {
     "approval-workflows":     Profile(0.90, 8, 2.2, 0.20, 10, 40, 600),
     "saml-attribute-mapping": Profile(0.0, 2, 0.8, 0.50, 4, 60, 120),   # usage is hand-placed (Globex)
     "gdpr-data-export":       Profile(0.02, 1, 0.4, 0.30, 2, 60, 150),
-    "ai-summaries":           Profile(0.05, 6, 5.0, 0.15, 10, 30, 4_000, llm=2_500, trend=0.45),
+    "ai-summaries":           Profile(0.05, 6, 5.0, 0.15, 10, 30, 4_000, llm=5_000, trend=0.45),
     "platform-auth-sso":      Profile(0.0, 0, 2.5, 0.30, 0, 0, 3_500),
     "design-system":          Profile(0.0, 0, 1.6, 0.10, 0, 0, 0),
     "billing-core":           Profile(0.0, 0, 1.2, 0.25, 0, 0, 900),

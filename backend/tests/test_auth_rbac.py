@@ -35,6 +35,7 @@ EXPECTED = {
     "settings:write": {A},
     "users:manage": {A},
     "flags:simulate": {A},
+    "reports:send": {P, A},
 }
 
 

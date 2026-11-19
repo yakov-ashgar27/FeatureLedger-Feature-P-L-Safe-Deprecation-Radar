@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { MarginBleedBadge } from "@/components/TokenBleed";
 import { useMemo, useState } from "react";
 import { CLASS_META, pct, STATE_LABEL, usd } from "@/lib/format";
 import type { FeatureClass, LedgerRow } from "@/lib/types";
@@ -82,7 +83,9 @@ export function LedgerTable({ rows }: { rows: LedgerRow[] }) {
                     {r.sunset_state ? <span className="ml-1 text-[#b4471c]">· {STATE_LABEL[r.sunset_state]}</span> : null}
                   </div>
                 </td>
-                <td className="px-3 py-2.5" title={r.classification_reason}><ClassBadge value={r.classification} /></td>
+                <td className="px-3 py-2.5" title={r.classification_reason}>
+                  <div className="flex flex-wrap items-center gap-1.5"><ClassBadge value={r.classification} />{r.margin_bleed && <MarginBleedBadge reason={r.margin_bleed_reason} />}</div>
+                </td>
                 {COLS.map((c) => <td key={c.key} className="num whitespace-nowrap px-3 py-2.5 text-right">{c.fmt(r)}</td>)}
               </tr>
             ))}

@@ -96,6 +96,9 @@ async def persist(conn, org: str, p, res: TransitionResult, note: dict[str, Any]
         u.get("blast_radius"), u.get("impact_dossier"), u.get("canary"), u.get("cleanup_pr"), entered,
         1 if res.action == "rollback" else 0)
     if res.to_state is SunsetState.ARCHIVED:
+        # freeze what the sunset reclaimed before the feature leaves the ledger (executive digest reads it)
+        await conn.execute("UPDATE sunset_plans SET reclaimed = $2 WHERE id = $1", p["id"],
+                           await reclaimed_snapshot(conn, p["feature_id"]))
         await conn.execute("UPDATE features SET status = 'archived', updated_at = now() WHERE id = $1", p["feature_id"])
     elif res.to_state is SunsetState.CANCELLED:
         await conn.execute("UPDATE features SET status = 'active', updated_at = now() WHERE id = $1", p["feature_id"])
@@ -106,6 +109,37 @@ async def persist(conn, org: str, p, res: TransitionResult, note: dict[str, Any]
     await audit(conn, org, p["id"], res.from_state.value, res.to_state.value, res.action,
                 {**note, **({"flag_action": u["flag_action"]} if "flag_action" in u else {})}, actor, system)
     return await load(conn, p["id"])
+
+
+async def reclaimed_snapshot(conn, feature_id) -> dict[str, Any]:
+    r = await conn.fetchrow("""
+        SELECT avg(p.eng_hours) AS h, avg(p.c_total) AS c, avg(p.c_ai_tokens) AS ai, avg(p.v_usage) AS v,
+               max(p.period_month) AS m, count(*) AS n
+          FROM feature_pnl_monthly p
+         WHERE p.feature_id = $1
+           AND p.period_month > (SELECT max(period_month) FROM feature_pnl_monthly) - interval '3 months'""", feature_id)
+    s = await conn.fetchrow("SELECT hours_per_engineer_month, allocatable_fraction FROM org_settings")
+    per_fte = float(s["hours_per_engineer_month"]) * float(s["allocatable_fraction"]) if s else 112.0
+    h, c, v = (float(r[k] or 0) for k in ("h", "c", "v")) if r else (0.0, 0.0, 0.0)
+    return {"eng_hours_month": round(h, 1), "fte": round(h / per_fte, 2), "cost_month": round(c, 2),
+            "ai_tokens_month": round(float(r["ai"] or 0), 2) if r else 0.0, "value_month": round(v, 2),
+            "net_month": round(v - c, 2), "basis_months": int(r["n"] or 0) if r else 0,
+            "basis_period": r["m"].isoformat()[:7] if r and r["m"] else None,
+            "archived_at": datetime.now(timezone.utc).isoformat()}
+
+
+async def providers_for(conn) -> tuple[FlagProvider, CleanupPRProvider]:
+    """The live-demo org never reaches a real vendor, whatever the deployment is configured with."""
+    from ..cleanup.github import SandboxGitHubProvider
+    from ..db import org_is_demo
+    from ..flags.sandbox import SandboxFlagProvider
+    repo = await conn.fetchval("SELECT full_name FROM repositories ORDER BY full_name LIMIT 1") or "northwind/app"
+    if await org_is_demo(conn):
+        return SandboxFlagProvider(), SandboxGitHubProvider(repo)
+    gh = get_cleanup_provider()
+    if isinstance(gh, SandboxGitHubProvider) and not config.cleanup_repo:
+        gh = SandboxGitHubProvider(repo, gh.base)
+    return get_flag_provider(), gh
 
 
 # ------------------------------------------------------------------------------------- flags
@@ -268,7 +302,7 @@ async def gather_context(conn, org: str, p, body_ctx: dict[str, Any], provider: 
     if p["state"] == SunsetState.CANARY_DARK_LAUNCH.value and canary.get("fully_off_at"):
         if p["flag_key"]:
             await ingest_evaluations(conn, org, p["flag_key"], datetime.fromisoformat(canary["fully_off_at"]),
-                                     provider or get_flag_provider(), now)
+                                     provider or (await providers_for(conn))[0], now)
         scream = await scream_evidence(conn, p, now)
         ctx["tickets_since_off"] = scream["tickets_since_off"]
         ctx["flag_on_evaluations"] = scream["flag_on_evaluations"]
@@ -285,6 +319,9 @@ async def execute(conn, org: str, p, res: TransitionResult, actor: Principal | N
     now = now or datetime.now(timezone.utc)
     note: dict[str, Any] = {}
     flag = p["flag_key"]
+    if flags is None or gh is None:
+        default_flags, default_gh = await providers_for(conn)
+        flags, gh = flags or default_flags, gh or default_gh
     who = actor.email if actor else "system"
     to = res.to_state
     if res.action == "transition" and to is SunsetState.CANARY_DARK_LAUNCH:
@@ -351,7 +388,7 @@ async def scan_canaries(conn, org: str, provider: FlagProvider | None = None,
     """Worker cron: pull evaluation counts for every plan in canary and raise a one-time 'scream_alert'
     audit note when 'on' evaluations or tickets appear during the scream test."""
     now = now or datetime.now(timezone.utc)
-    provider = provider or get_flag_provider()
+    provider = provider or (await providers_for(conn))[0]
     out = []
     for p in await conn.fetch(PLAN_SQL + " WHERE p.state = 'canary_dark_launch'"):
         canary = p["canary"] or {}

@@ -128,6 +128,10 @@ async def main(seed: bool) -> None:
             org_id = await bootstrap_real_org(conn)
         target = org_id or await conn.fetchval("SELECT id::text FROM organizations WHERE slug = $1",
                                                config.default_org_slug)
+        from .demo import ensure_demo
+        demo = await ensure_demo(conn)
+        if demo:
+            log.info("live demo org %s ready", config.demo_org_slug)
         if target:
             live = await ensure_live_integrations(conn, target)
             if live:

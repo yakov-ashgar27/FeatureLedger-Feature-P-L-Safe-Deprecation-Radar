@@ -21,6 +21,7 @@ jobs:
         env:
           ADMIN_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/featureledger
           SANDBOX_MODE: "false"
+          DEMO_MODE: "true"
         run: cd backend && python -m app.migrate
       - name: RLS blocks reads without a tenant
         run: |
@@ -33,6 +34,14 @@ jobs:
           DATABASE_URL: postgresql://featureledger_app:app_dev_password@localhost:5432/featureledger
           ADMIN_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/featureledger
         run: cd backend && python -m pytest tests/test_phase4_api.py -v
+      - name: "Phase 5 over HTTP: AI margin, Zombie-Guard webhook, executive digest, live demo isolation + reset"
+        env:
+          FL_INTEGRATION: "1"
+          SANDBOX_MODE: "true"
+          DEMO_MODE: "true"
+          DATABASE_URL: postgresql://featureledger_app:app_dev_password@localhost:5432/featureledger
+          ADMIN_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/featureledger
+        run: cd backend && python -m pytest tests/test_phase5_api.py -v
 
   web:
     runs-on: ubuntu-latest
@@ -158,13 +167,29 @@ jobs:
           curl -fs -H "Authorization: Bearer $TOKEN_ADMIN" "http://localhost:8000/api/v1/triage?status=decided" | python3 -c "import json,sys; assert len(json.load(sys.stdin)['items']) == 1"
       - name: dashboard pages render through the proxy (signed in)
         run: |
-          for p in / /features/legacy-pdf-export /simulator /sunset /mappings /integrations /settings; do
+          for p in / /features/legacy-pdf-export /simulator /sunset /mappings /integrations /settings /zombie-guard /reports; do
             curl -fs -H "Cookie: fl_session=$TOKEN_VIEWER" "http://localhost:3000$p" -o /dev/null && echo "ok $p"
           done
           curl -fs -H "Cookie: fl_session=$TOKEN_VIEWER" http://localhost:3000/api/v1/periods
           test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/sunset)" = "307"
       - name: "Phase 4 walkthrough: RBAC, live flag canary, scream guards, cleanup PR, merge webhook, rollback"
         run: python3 scripts/e2e_phase4.py http://localhost:3000
+      - name: "Phase 5 walkthrough: zero-login demo, role switch, isolation, Trigger Sync, radar, Zombie-Guard, digest"
+        run: python3 scripts/e2e_phase5.py http://localhost:3000
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: README screenshots of the live demo
+        continue-on-error: true
+        run: |
+          pip install --quiet playwright && python -m playwright install --with-deps chromium > /dev/null
+          python scripts/screenshots.py http://localhost:3000 screenshots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        continue-on-error: true
+        with:
+          name: demo-screenshots
+          path: screenshots/
+          if-no-files-found: ignore
       - if: failure()
         run: docker compose logs
       - name: worker stage timings

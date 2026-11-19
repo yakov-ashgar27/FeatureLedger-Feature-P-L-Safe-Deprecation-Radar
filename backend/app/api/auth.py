@@ -54,7 +54,7 @@ def _set_session(resp: Response, token: str) -> None:
 @router.get("/auth/config")
 async def auth_config():
     s = oidc_settings() if config.oidc_enabled else None
-    return {"sandbox_mode": config.sandbox_mode, "dev_login": config.dev_login_enabled,
+    return {"sandbox_mode": config.sandbox_mode, "dev_login": config.dev_login_enabled, "demo_mode": config.demo_mode,
             "oidc": {"enabled": True, "provider": s.provider, "label": s.label} if s else {"enabled": False},
             "roles": [r.value for r in Role]}
 
@@ -163,6 +163,8 @@ class UserPatch(BaseModel):
 
 @router.patch("/users/{user_id}")
 async def update_user(user_id: str, body: UserPatch, p: Principal = Depends(require("users:manage"))):
+    if p.is_demo:
+        raise HTTPException(409, "users are fixed in the live demo (switch roles from the demo banner)")
     if user_id == p.user_id and (body.disabled or (body.role and body.role != "admin")):
         raise HTTPException(409, "you cannot demote or disable yourself (ask another admin)")
     async with org_tx(p.org_id) as conn:

@@ -44,6 +44,10 @@ class GitHubSyncIn(BaseModel):
 
 @router.post("/integrations/github/sync", status_code=202)
 async def github_sync(body: GitHubSyncIn, tasks: BackgroundTasks, org: str = Depends(org_for("integrations:manage"))):
+    async with org_tx(org) as conn:
+        from ..db import org_is_demo
+        if await org_is_demo(conn):
+            raise HTTPException(409, "the live demo cannot ingest real repositories")
     if not config.github_token:
         raise HTTPException(412, "set GITHUB_TOKEN (read-only: contents + pull requests) to enable GitHub sync")
     if body.repo.count("/") != 1:
@@ -100,6 +104,8 @@ class SettingsIn(BaseModel):
     anchor_min_arr_usd: float | None = Field(None, ge=0)
     mapping_auto_confirm: float | None = Field(None, ge=0.5, le=1)
     min_team_size_for_display: int | None = Field(None, ge=1, le=50)
+    margin_bleed_min_adoption: float | None = Field(None, ge=0, le=1)
+    margin_bleed_max_gross_margin: float | None = Field(None, ge=-1, le=1)
 
 
 @router.put("/settings")

@@ -21,6 +21,11 @@ export interface LedgerRow {
   c_eng: number;
   c_support: number;
   c_infra: number;
+  c_ai_tokens: number;
+  gross_margin_pct: number | null;
+  margin_bleed: boolean;
+  margin_bleed_reason?: string | null;
+  ai_tier_breakdown?: Record<string, AiTier>;
   c_overhead_alloc: number;
   c_total: number;
   value: number;
@@ -48,6 +53,9 @@ export interface Ledger {
     zombie_count: number;
     zombie_tax_month: number;
     zombie_eng_hours_month: number;
+    ai_token_spend_month: number;
+    margin_bleed_count: number;
+    margin_bleed_features: string[];
     untagged_infra_month: number;
     eng_capacity_hours: number;
     unmapped_eng_hours: number;
@@ -63,6 +71,11 @@ export interface PnlMonth {
   c_eng: number;
   c_support: number;
   c_infra: number;
+  c_ai_tokens: number;
+  gross_margin_pct: number | null;
+  margin_bleed: boolean;
+  margin_bleed_reason: string | null;
+  ai_tier_breakdown: Record<string, AiTier>;
   c_total: number;
   c_overhead_alloc: number;
   v_usage: number;
@@ -180,11 +193,11 @@ export type Role = "viewer" | "pm_tech_lead" | "cs_lead" | "admin";
 
 export interface Me {
   id: string | null; email: string; name: string | null; role: Role; kind: "user" | "service";
-  org: { id: string; slug: string }; permissions: string[];
+  org: { id: string; slug: string }; permissions: string[]; demo?: boolean;
 }
 
 export interface AuthConfig {
-  sandbox_mode: boolean; dev_login: boolean; roles: Role[];
+  sandbox_mode: boolean; dev_login: boolean; demo_mode?: boolean; roles: Role[];
   oidc: { enabled: boolean; provider?: string; label?: string };
 }
 
@@ -198,3 +211,43 @@ export interface TriageItem {
   suggested_feature_key: string | null;
   suggested_feature_name: string | null;
 }
+
+export interface AiTier { tokens_usd: number; revenue_usd: number; accounts: number; events: number; token_share: number }
+
+export interface AiMarginFeature {
+  key: string; name: string; tier_gate: string | null; classification: string; margin_bleed: boolean;
+  margin_bleed_reason: string | null; tiers: Record<string, AiTier>;
+  history: { period: string; v_usage: number; c_ai_tokens: number; c_infra: number; gross_margin_pct: number | null; margin_bleed: boolean; adoption: number }[];
+}
+
+export interface AiMargin { thresholds: { min_adoption: number; max_gross_margin: number }; features: AiMarginFeature[] }
+
+export interface GuardFeature {
+  key: string; name: string; status: string; classification: string | null; net_3m: number | null; adoption: number | null;
+  gross_margin_pct: number | null; margin_bleed: boolean; sunset_state: string | null; stage: string; flagged: boolean; files: number;
+}
+
+export interface GuardPreview { flagged: boolean; features: GuardFeature[]; unmapped_files: number; comment_markdown: string | null }
+
+export interface GuardComment {
+  repo: string; pr_number: number; provider: string; comment_id: number; head_sha: string | null; features: string[];
+  flagged: boolean; updates: number; body: string; created_at: string; updated_at: string;
+}
+
+export interface DigestTotals { cost_month: number; eng_hours_month: number; fte: number; annualized: number; sunsets: number }
+
+export interface Digest {
+  org: { name: string; slug: string; demo: boolean };
+  period: string; ledger_period: string | null; generated_at: string;
+  zombie_tax: { outstanding: { cost_month: number; eng_hours_month: number; fte: number; features: string[] };
+    reclaimed_this_month: DigestTotals; reclaimed_to_date: DigestTotals };
+  sunsets_completed: { feature: string; key: string; cost_month: number; eng_hours_month: number; fte: number; archived_at: string }[];
+  sunsets_in_flight: { feature: string; key: string; state: string; days_in_state: number; rollbacks: number }[];
+  top_bleeders: { key: string; name: string; kind: "margin_bleed" | "net_loss"; bleed_month: number; net_month: number;
+    ai_tokens_month: number; gross_margin_pct: number | null; adoption: number; reason: string | null }[];
+  ai: { token_spend_month: number; margin_bleed_features: string[] };
+  data_health: { status: "healthy" | "attention" | "poor"; score: number; checks: { name: string; ok: boolean; detail: string }[] };
+  links: { brief: string; dashboard: string };
+}
+
+export interface DemoStatus { enabled: boolean; ready?: boolean; name?: string; label?: string; engineers?: number; default_role?: Role }

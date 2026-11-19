@@ -3,8 +3,10 @@
 Per feature f and month m (Contribution view = direct, avoidable cost):
     C_eng     = calibrated_hours(f, m) * eng_hourly_rate
     C_support = sum(handle_minutes)/60 * support_hourly_rate      (tickets mapped to f)
-    C_infra   = tagged infra + LLM spend for f
-    C_total   = C_eng + C_support + C_infra
+    C_infra   = tagged (fixed) cloud infra for f
+    C_ai      = variable AI/LLM token spend for f (Phase 5)
+    C_total   = C_eng + C_support + C_infra + C_ai
+    GM%       = (V_usage - C_ai - C_infra) / max(V_usage, 1)      gross margin on variable + infra COGS
     Net_ROI   = V_total - C_total
     Efficiency= V_total / max(C_total, 1)
 Fully-loaded view adds C_overhead_alloc: the cost of shared-overhead features spread by their
@@ -24,7 +26,7 @@ from .attribution import MonthAttribution, attribute_month
 from .effort import TeamCalibration, allocate_effort
 from .types import AttributionModel, Dataset, Feature, FeatureClass, OrgSettings
 
-MODEL_VERSION = "pnl-2026.11-v1"
+MODEL_VERSION = "pnl-2026.11-v2"
 
 
 @dataclass
@@ -37,6 +39,7 @@ class FeaturePnl:
     c_eng: float = 0.0
     c_support: float = 0.0
     c_infra: float = 0.0
+    c_ai_tokens: float = 0.0
     c_overhead_alloc: float = 0.0
     v_usage: float = 0.0
     v_tier: float = 0.0
@@ -47,10 +50,17 @@ class FeaturePnl:
     anchor_accounts: int = 0
     classification: FeatureClass = FeatureClass.WATCH
     classification_reason: str = ""
+    margin_bleed: bool = False
+    margin_bleed_reason: str | None = None
+    ai_tier_breakdown: dict = field(default_factory=dict)
 
     @property
     def c_total(self) -> float:
-        return self.c_eng + self.c_support + self.c_infra
+        return self.c_eng + self.c_support + self.c_infra + self.c_ai_tokens
+
+    @property
+    def gross_margin_pct(self) -> float:
+        return (self.v_usage - self.c_ai_tokens - self.c_infra) / max(self.v_usage, 1.0)
 
     @property
     def bug_tax_ratio(self) -> float:
@@ -96,6 +106,11 @@ def compute_pnl(ds: Dataset, months: list[date]) -> PnlResult:
     feats = {f.id: f for f in ds.features}
     effort, cal = allocate_effort(ds.work_items, ds.teams, ds.features, s, months)
 
+    usage_by_fm: dict[tuple[date, str], list] = defaultdict(list)
+    for u in ds.usage:
+        usage_by_fm[(u.period_month, u.feature_id)].append(u)
+    attributed: dict[tuple[date, str], dict[str, float]] = defaultdict(dict)
+
     rows: dict[tuple[date, str], FeaturePnl] = {}
     for m in months:
         for f in ds.features:
@@ -118,7 +133,11 @@ def compute_pnl(ds: Dataset, months: list[date]) -> PnlResult:
         if c.period_month not in months:
             continue
         if c.feature_id in feats:
-            rows[(c.period_month, c.feature_id)].c_infra += c.amount_usd
+            r = rows[(c.period_month, c.feature_id)]
+            if c.cost_type == "llm":
+                r.c_ai_tokens += c.amount_usd
+            else:
+                r.c_infra += c.amount_usd
         else:
             untagged[c.period_month] += c.amount_usd
 
@@ -127,6 +146,8 @@ def compute_pnl(ds: Dataset, months: list[date]) -> PnlResult:
         att = attribute_month(m, ds.accounts_by_month.get(m, []), ds.usage, ds.account_active_days,
                               ds.features, s)
         attributions[m] = att
+        for v in att.per_account:
+            attributed[(m, v.feature_id)][v.account_id] = v.attributed_mrr
         for f in ds.features:
             r = rows[(m, f.id)]
             r.v_usage = att.v_usage.get(f.id, 0.0)
@@ -139,10 +160,17 @@ def compute_pnl(ds: Dataset, months: list[date]) -> PnlResult:
 
     for i, m in enumerate(months):
         window = months[max(0, i - 2): i + 1]
+        tiers = {a.id: a.plan_tier for a in ds.accounts_by_month.get(m, [])}
+        mrr = {a.id: a.arr_usd / 12.0 for a in ds.accounts_by_month.get(m, [])}
         for f in ds.features:
+            r = rows[(m, f.id)]
             cls, why = classify(f, [rows[(w, f.id)] for w in window], s)
-            rows[(m, f.id)].classification = cls
-            rows[(m, f.id)].classification_reason = why
+            r.classification = cls
+            r.classification_reason = why
+            if r.c_ai_tokens > 0:
+                r.ai_tier_breakdown = ai_tier_breakdown(r, usage_by_fm.get((m, f.id), []), tiers,
+                                                        attributed.get((m, f.id), {}), mrr)
+            r.margin_bleed, r.margin_bleed_reason = detect_margin_bleed(f, r, s)
 
     return PnlResult(months, rows, cal, attributions, dict(untagged))
 
@@ -211,3 +239,51 @@ def classify(f: Feature, window: list[FeaturePnl], s: OrgSettings) -> tuple[Feat
         return FeatureClass.CASH_COW, f"Efficiency {cur.efficiency():.1f}x on ${cur.v_usage:,.0f}/mo attributed"
     return FeatureClass.WATCH, (
         f"Efficiency {cur.efficiency():.2f}x, adoption {adoption:.1%}: no rule triggered")
+
+
+LOW_TIERS = ("free", "starter")
+
+
+def ai_tier_breakdown(r: FeaturePnl, usage: list, tiers: dict[str, str], attributed: dict[str, float],
+                      mrr: dict[str, float]) -> dict[str, dict]:
+    """Spread the feature's token spend over plan tiers by usage events (the closest proxy to tokens
+    available without per-request metering), next to the revenue the feature earns on each tier."""
+    events: dict[str, int] = defaultdict(int)
+    accounts: dict[str, int] = defaultdict(int)
+    revenue: dict[str, float] = defaultdict(float)
+    tier_mrr: dict[str, float] = defaultdict(float)
+    for u in usage:
+        if u.events <= 0:
+            continue
+        t = tiers.get(u.account_id, "unknown")
+        events[t] += u.events
+        accounts[t] += 1
+        revenue[t] += attributed.get(u.account_id, 0.0)
+        tier_mrr[t] += mrr.get(u.account_id, 0.0)
+    total = sum(events.values())
+    if total == 0:
+        return {}
+    return {t: {"tokens_usd": round(r.c_ai_tokens * events[t] / total, 2), "revenue_usd": round(revenue[t], 2),
+                "accounts": accounts[t], "events": events[t], "token_share": round(events[t] / total, 4)}
+            for t in sorted(events, key=lambda t: -events[t])}
+
+
+def detect_margin_bleed(f: Feature, r: FeaturePnl, s: OrgSettings) -> tuple[bool, str | None]:
+    """margin_bleed: a popular feature whose variable AI spend (with infra) leaves too little gross margin.
+    Independent of the health class: a Growth Bet can bleed margin too, and that is exactly when to look."""
+    if f.is_shared_overhead or r.c_ai_tokens <= 0 or r.eligible_accounts == 0:
+        return False, None
+    gm = r.gross_margin_pct
+    if r.adoption <= s.margin_bleed_min_adoption or gm >= s.margin_bleed_max_gross_margin:
+        return False, None
+    if r.c_ai_tokens < r.c_infra:      # infra-driven, not token-driven: not this alert
+        return False, None
+    low = [r.ai_tier_breakdown[t] for t in LOW_TIERS if t in r.ai_tier_breakdown]
+    low_tokens = sum(x["tokens_usd"] for x in low)
+    low_rev = sum(x["revenue_usd"] for x in low)
+    why = (f"Gross margin {gm:.0%} at {r.adoption:.0%} adoption: ${r.c_ai_tokens:,.0f}/mo LLM tokens + "
+           f"${r.c_infra:,.0f} infra on ${r.v_usage:,.0f} attributed revenue")
+    if low_tokens > 0:
+        share = low_tokens / r.c_ai_tokens
+        why += f"; free/starter accounts burn {share:.0%} of tokens (${low_tokens:,.0f}) for ${low_rev:,.0f} revenue"
+    return True, why

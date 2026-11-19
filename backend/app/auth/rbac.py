@@ -53,6 +53,7 @@ PERMISSIONS: dict[str, tuple[frozenset[Role], str]] = {
     "settings:write":          (frozenset({A}), "org_settings: rates, thresholds"),
     "users:manage":            (frozenset({A}), "list users, change roles, disable"),
     "flags:simulate":          (frozenset({A}), "SANDBOX_MODE: inject flag evaluations, simulate a PR merge"),
+    "reports:send":            (frozenset({P, A}), "store and send the executive digest (Slack)"),
 }
 
 # Which permission a forward transition needs, by the state the plan is leaving.

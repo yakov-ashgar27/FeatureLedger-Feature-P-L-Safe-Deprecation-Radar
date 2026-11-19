@@ -66,6 +66,12 @@ class Config:
     cleanup_repo: str | None = field(default_factory=lambda: os.environ.get("SUNSET_CLEANUP_REPO") or None)
     cleanup_base_branch: str | None = field(default_factory=lambda: os.environ.get("SUNSET_CLEANUP_BASE") or None)
 
+    # ---------------------------------------------------------------- Phase 5: live demo
+    # DEMO_MODE=true: a public "Launch Live Demo" button signs visitors into an isolated, resettable demo org
+    demo_mode: bool = field(default_factory=lambda: _bool(os.environ.get("DEMO_MODE"), False))
+    demo_org_slug: str = field(default_factory=lambda: os.environ.get("DEMO_ORG_SLUG", "acme-demo"))
+    demo_org_name: str = field(default_factory=lambda: os.environ.get("DEMO_ORG_NAME", "Acme Cloud"))
+
     @property
     def dev_login_enabled(self) -> bool:
         return self.sandbox_mode and self.dev_login

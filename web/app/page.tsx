@@ -4,8 +4,9 @@ import { LedgerTable } from "@/components/LedgerTable";
 import { QuadrantScatter } from "@/components/QuadrantScatter";
 import { ErrorBox, Kpi, SectionTitle } from "@/components/ui";
 import { serverLoad } from "@/lib/server";
-import { num, usdShort } from "@/lib/format";
-import type { Ledger } from "@/lib/types";
+import { TokenBleedRadar } from "@/components/TokenBleed";
+import { num, pct, usdShort } from "@/lib/format";
+import type { AiMargin, Ledger } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +19,10 @@ export default async function LedgerPage({ searchParams }: { searchParams: Promi
   const win = sp.window ?? "3";
   const qs = new URLSearchParams({ model, view, window: win, ...(sp.period ? { period: sp.period } : {}) });
 
-  const res = await serverLoad<Ledger>(`/api/v1/pnl?${qs}`, `/?${qs}`);
+  const [res, radar] = await Promise.all([
+    serverLoad<Ledger>(`/api/v1/pnl?${qs}`, `/?${qs}`),
+    serverLoad<AiMargin>("/api/v1/ai-margin?months=6", `/?${qs}`),
+  ]);
   if (res.error !== null) return <ErrorBox error={`Could not load the ledger: ${res.error}. Is the API running?`} />;
   const data = res.data;
   const s = data.summary;
@@ -58,6 +62,14 @@ export default async function LedgerPage({ searchParams }: { searchParams: Promi
         <Kpi label="Data gaps" value={`${num(s.unmapped_eng_hours)} h`}
           sub={`unmapped eng · ${usdShort(s.untagged_infra_month)} untagged infra`} />
       </section>
+
+      {radar.data && radar.data.features.length > 0 && (
+        <section>
+          <SectionTitle title="Token-Bleed Radar"
+            sub={`AI token spend vs. the revenue each plan tier brings. Margin bleed = adoption over ${pct(radar.data.thresholds.min_adoption, 0)} and gross margin under ${pct(radar.data.thresholds.max_gross_margin, 0)}, driven by tokens. ${usdShort(s.ai_token_spend_month)}/mo total AI spend.`} />
+          <TokenBleedRadar features={radar.data.features} maxGm={radar.data.thresholds.max_gross_margin} />
+        </section>
+      )}
 
       <section className="card p-5">
         <SectionTitle title="Cost vs. value"

@@ -3,7 +3,34 @@
 [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/yakov-ashgar27/FeatureLedger-Feature-P-L-Safe-Deprecation-Radar?quickstart=1)
 [![ci](https://github.com/yakov-ashgar27/FeatureLedger-Feature-P-L-Safe-Deprecation-Radar/actions/workflows/ci.yml/badge.svg)](https://github.com/yakov-ashgar27/FeatureLedger-Feature-P-L-Safe-Deprecation-Radar/actions/workflows/ci.yml)
 
-**Run it with one click:** press *Open in GitHub Codespaces*. The whole stack builds and starts in the cloud, and the dashboard opens by itself in 3–6 minutes. Nothing to install. Sign in with one of the four sandbox roles.
+**Run it with one click:** press *Open in GitHub Codespaces*. The whole stack builds and starts in the cloud, and the dashboard opens by itself in 3–6 minutes. Nothing to install. Press **Launch Live Demo (Acme Cloud — 45 Engineers)**: no sign-up, no setup.
+
+## Live demo in 30 seconds
+
+![Landing: one-click live demo](docs/img/demo-landing.png)
+
+1. **Launch Live Demo.** You are a PM / Tech lead inside *Acme Cloud*, an isolated demo tenant (45 engineers, ~520
+   accounts, 6 months of history). The yellow banner switches you to Viewer, CS lead or Admin in one click and
+   resets the demo to its starting data.
+2. **Feature P&L.** The ledger, the cost-vs-value quadrant, and the **Token-Bleed Radar**: *AI Summaries* is
+   used by 37% of accounts, but its LLM tokens eat the revenue (gross margin 11% in the latest month), and
+   free and starter accounts burn 16% of the tokens for almost no revenue.
+3. **What-if simulator.** The three zombies are pre-selected: ~4.5 FTE and over $600k/yr of avoidable cost.
+4. **Zombie-Guard.** Paste the files of a pull request and see the comment the bot would post on GitHub.
+5. **Safe Sunset** (switch to *Admin*). *Zapier v1 Webhooks* has passed its scream test: *Approve cleanup PR*
+   opens `acme/app#1001`, *Sandbox: merge the PR* archives it. Rolling back puts the flag fully on again.
+6. **Integrations** (Admin): *Trigger Sync* runs the five sandbox connectors against vendor-shaped fixture APIs.
+7. **Executive brief.** The month's reclaimed zombie tax (with the sunset you just finished), the top 3 bleeding
+   features, data health; *Download PDF*, or *Send digest to Slack* (a dry run in the demo).
+
+| | |
+| --- | --- |
+| ![Ledger with demo banner and Token-Bleed Radar](docs/img/demo-ledger.png) | ![AI gross margin on the tear-sheet](docs/img/demo-tearsheet-ai.png) |
+| ![Zombie-Guard preview](docs/img/demo-zombie-guard.png) | ![Executive Brief](docs/img/demo-brief.png) |
+
+The demo tenant only ever uses sandbox providers (flags, GitHub, PR comments, Slack), even on a deployment
+configured with real credentials, and its sessions cannot reach any other tenant (Postgres RLS). Turn it off
+with `DEMO_MODE=false` on a production deployment.
 
 FeatureLedger gives every in-house product feature a monthly **profit & loss** statement. It joins
 engineering effort (Git), support load, cloud and LLM spend, and tenant-level usage and ARR.
@@ -56,6 +83,40 @@ APIs, flags and cleanup PRs go to sandbox providers, and sign-in is one click pe
 | 2 | Stripe, Jira, PostHog, Zendesk, AWS Cost Explorer; ARQ worker; Sync Health | `backend/app/connectors`, `worker.py` |
 | 3 | features.yaml push sync, Tier 2 structural + Tier 3 semantic mapping, triage | `backend/app/graph` |
 | 4 | Live flag control, automated cleanup PRs + merge webhook, OIDC SSO, RBAC | `backend/app/flags`, `cleanup`, `execution`, `auth` |
+| 5 | AI gross margin + Token-Bleed Radar, Zombie-Guard PR bot, executive digest (Slack, PDF), live demo | `backend/app/core/pnl.py`, `guard`, `reports`, `demo.py` |
+
+## Phase 5: differentiators
+
+**AI gross margin & Token-Bleed Radar.** Variable LLM spend is now its own cost line, `c_ai_tokens`, separate
+from fixed cloud infra (`c_infra`); `c_total` is unchanged. Every feature-month gets
+`gross_margin_pct = (v_usage − c_ai_tokens − c_infra) / max(v_usage, 1)` and a per-tier split of token spend
+(by usage events) next to the revenue each tier brings. **`margin_bleed`** fires when adoption is above 15% and
+gross margin below 20%, and tokens (not infra) drive the cost. Both thresholds are org settings. The flag sits beside
+the health class, so a Growth Bet can bleed margin too. It shows on the ledger (badge + radar) and the tear-sheet.
+
+**Zombie-Guard.** On GitHub `pull_request` *opened / synchronize / reopened*, the changed files are resolved
+through the Feature Graph (human > manifest > auto-confirmed). If a zombie, a feature in a live sunset plan,
+or an archived feature is touched, one non-blocking comment shows its trailing 3-month net P&L, adoption and
+sunset stage. On every push the same comment is edited in place, and only if the facts changed (a marker finds it
+even after a database reset). FeatureLedger's own `sunset/*` cleanup PRs are skipped.
+`GitHubCommentProvider` / `SandboxCommentProvider`; the *Zombie-Guard* page previews the comment for any set of paths.
+
+**Executive digest.** On the 1st of every month (worker cron) and on demand
+(`POST /api/v1/reports/executive-digest`):
+- the zombie tax reclaimed this month (hours, FTE, $), frozen per sunset at archive time;
+- completed sunsets and those still in flight;
+- the top 3 bleeding features (net loss or AI overspend against the target margin);
+- data-gap health.
+
+It posts Block Kit to `SLACK_WEBHOOK_URL` (a dry run with a preview in `SANDBOX_MODE` and in the demo).
+*Executive brief* in the dashboard is print-ready (*Download PDF*), and `/api/v1/reports/executive-brief.html`
+is a self-contained HTML version.
+
+**Live demo (`DEMO_MODE=true`).** The seed company is re-keyed into its own tenant (`acme-demo`) with
+deterministic ids, so `POST /api/v1/demo/reset` restores exactly the same plans and users in a few seconds.
+- *Launch* and *switch role* issue sessions only for that org.
+- Reset refuses any org not flagged `is_demo`.
+- The append-only audit log may be purged only for that demo org, and never by the application role.
 
 ## Phase 4: automated Safe Sunset execution & enterprise auth
 
@@ -107,6 +168,7 @@ Postgres RLS isolates tenants underneath.
 | Approve `→ dead_code_pr_opened` (opens the PR), manual archive | | | | ✓ |
 | Roll back a canary (flag fully on) | | ✓ | ✓ | ✓ |
 | Cancel a plan | | ✓ | | ✓ |
+| Send the executive digest (Slack) | | ✓ | | ✓ |
 | Integrations, imports, features.yaml apply, org settings (rates, thresholds), users & roles | | | | ✓ |
 
 Webhooks (GitHub, Stripe, Jira, Zendesk, PostHog, Statsig) carry no user: the tenant is resolved from the
@@ -140,6 +202,9 @@ The same walkthrough runs headless in CI: `make e2e` (or `python3 scripts/e2e_ph
 | SSO | `OIDC_PROVIDER`, `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_ROLE_MAP`, `BOOTSTRAP_ADMIN_EMAILS`, `SESSION_SECRET`, `APP_URL`; register `${APP_URL}/api/v1/auth/oidc/callback` at the IdP |
 | Flags | `LAUNCHDARKLY_API_TOKEN` (+ project, environment, context kind) or `STATSIG_CONSOLE_API_KEY` (+ `STATSIG_WEBHOOK_SECRET`) |
 | Cleanup PRs | `GITHUB_CLEANUP_TOKEN` (fine-grained: Contents + Pull requests read/write on one repo), `SUNSET_CLEANUP_REPO`; add the *Pull requests* event to the GitHub webhook |
+| Zombie-Guard | the same GitHub webhook with *Pull requests* events; `GITHUB_TOKEN` (read) to list PR files; `GITHUB_COMMENT_TOKEN` (Pull requests: write) to comment |
+| Executive digest | `SLACK_WEBHOOK_URL`, `SANDBOX_MODE=false` |
+| Public demo | `DEMO_MODE=true` only on a deployment meant for visitors; `false` wherever real data lives |
 
 ## Earlier phases in one paragraph each
 
@@ -165,7 +230,7 @@ auto-confirmed (≥ 0.80) > triage.
 | Zapier v1 Webhooks, Bulk CSV Import v1 | **Zombie** | Tiny usage, high maintenance |
 | Custom SAML Attribute Mapping | **Niche Anchor** | <7% adoption, but Globex ($180k ARR, renews in Dec) uses it on 14 of 22 days |
 | GDPR Data Export | **Mandated** | Regulatory: never a sunset candidate |
-| AI Summaries | **Growth Bet** | Launched 2026-04, adoption +48%/mo, LLM-heavy |
+| AI Summaries | **Growth Bet** + **margin bleed** | Launched 2026-04, 37% adoption, ~$31k/mo of LLM tokens on ~$40k/mo revenue: 11% gross margin |
 
 The What-if Simulator pre-selects the three zombies: roughly **4.5 FTE** (about 510 engineering hours a month)
 and **over $600k/yr** of avoidable cost, against ~$115k of expected ARR loss across 31 accounts.
@@ -182,11 +247,15 @@ backend/app/auth/        Phase 4: RBAC matrix, sessions, OIDC (PKCE, JWKS), Fast
 backend/app/flags/       Phase 4: FeatureFlagProvider: LaunchDarkly, Statsig, sandbox
 backend/app/cleanup/     Phase 4: cleanup change builder + GitHub / sandbox PR providers
 backend/app/execution/   Phase 4: sunset orchestrator (flags, PRs, merge webhook, scream monitor)
+backend/app/guard/       Phase 5: Zombie-Guard (Feature Graph lookup, comment rendering, GitHub / sandbox comments)
+backend/app/reports/     Phase 5: executive digest, Slack Block Kit, print-ready brief
+backend/app/demo.py      Phase 5: live demo tenant (re-keyed seed, guarded reset)
 backend/app/worker.py    ARQ worker: 15-minute syncs, flag evaluations, hourly graph, triggers
 backend/app/api/         FastAPI routes
 backend/tests/           unit tests + an HTTP integration suite (FL_INTEGRATION=1) run by CI on real Postgres
 web/                     Next.js 15: login, ledger, tear-sheet, simulator, sunset board, triage, sync health, settings
-scripts/e2e_phase4.py    the demo walkthrough as an executable check
+scripts/e2e_phase4.py    the Phase 4 walkthrough as an executable check
+scripts/e2e_phase5.py    the live-demo walkthrough (launch, roles, isolation, Trigger Sync, radar, guard, digest)
 docs/SPEC.md             formulas, state machine, API, design decisions
 ```
 
@@ -199,9 +268,15 @@ cd backend && python -m app.migrate   # migrate/seed against ADMIN_DATABASE_URL
 cd web && npm install && npm run dev  # dashboard on :3000 (API_URL defaults to localhost:8000)
 ```
 
-CI (`.github/workflows/ci.yml`) runs three jobs: **backend** (unit tests, migrations on pgvector Postgres,
-RLS check, the Phase 4 HTTP suite with all four roles and a second tenant), **web** (typecheck + build) and
-**e2e** (`docker compose up`, sandbox syncs, Phase 3 checks, signed-in page renders, the Phase 4 walkthrough).
+CI (`.github/workflows/ci.yml`) runs three jobs:
+- **backend:** unit tests; migrations on pgvector Postgres; the RLS check; the Phase 4 and 5 HTTP suites (four roles,
+  a second tenant, the demo tenant).
+- **web:** typecheck and build.
+- **e2e:**
+  - `docker compose up` and the sandbox syncs;
+  - the Phase 3 checks and the signed-in page renders;
+  - the Phase 4 and Phase 5 walkthroughs, including Trigger Sync in the demo leaving the ledger unchanged;
+  - README screenshots.
 
 ### Use your own data
 

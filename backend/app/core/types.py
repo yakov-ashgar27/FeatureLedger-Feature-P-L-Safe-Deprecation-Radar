@@ -53,6 +53,9 @@ class OrgSettings:
     growth_max_age_months: int = 9
     growth_min_mom_adoption: float = 0.10
     cash_cow_min_efficiency: float = 2.0
+    # Phase 5: AI gross margin ("margin_bleed": popular, but token spend eats the revenue)
+    margin_bleed_min_adoption: float = 0.15
+    margin_bleed_max_gross_margin: float = 0.20
 
 
 @dataclass(frozen=True)
