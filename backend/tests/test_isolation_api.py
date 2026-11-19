@@ -182,6 +182,7 @@ def test_every_route_refuses_a_foreign_tenant(client, tenant_a, tenant_b):
     secrets = secrets_of(tenant_a)
     tested, failures = 0, []
     routes = [r for r in app.routes if isinstance(r, APIRoute) and not PUBLIC_ROUTES.match(r.path)]
+    expected = sum(1 for r in routes for m in r.methods - {"HEAD", "OPTIONS"} if (m, r.path) not in SKIP)
     for route in routes:
         for method in sorted(route.methods - {"HEAD", "OPTIONS"}):
             if (method, route.path) in SKIP:
@@ -202,7 +203,7 @@ def test_every_route_refuses_a_foreign_tenant(client, tenant_a, tenant_b):
             leaked = [s for s in secrets if s in text]
             if r.status_code >= 500 or leaked:
                 failures.append(f"{method} {path} -> {r.status_code} leaked={leaked[:3]} {text[:160]}")
-    assert tested >= 45, f"only {tested} route calls"
+    assert tested == expected and tested >= 40, f"{tested} of {expected} authenticated route calls made"
     assert not failures, "\n".join(failures)
 
 

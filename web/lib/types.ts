@@ -23,6 +23,7 @@ export interface LedgerRow {
   c_infra: number;
   c_ai_tokens: number;
   archived?: boolean;
+  confidence?: Pick<Confidence, "level" | "score" | "reasons"> | null;
   gross_margin_pct: number | null;
   margin_bleed: boolean;
   margin_bleed_reason?: string | null;
@@ -253,3 +254,16 @@ export interface Digest {
 }
 
 export interface DemoStatus { enabled: boolean; ready?: boolean; name?: string; label?: string; engineers?: number; default_role?: Role }
+
+export interface Confidence {
+  level: "high" | "medium" | "low"; score: number; cost_quality: number; verdict_stable: boolean; has_value_data: boolean;
+  reasons: string[];
+  coverage: Record<string, number | null>;
+  net_by_model: { usage_weighted: number; tier_gated: number };
+}
+
+export interface Explain {
+  key: string; period: string; classification: string; classification_reason: string;
+  lines: { line: string; amount: number; how: string; measured: number | null; measured_label: string | null }[];
+  confidence: Confidence;
+}

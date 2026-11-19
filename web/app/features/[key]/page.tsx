@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { CostTrend } from "@/components/CostTrend";
+import { WhyThisNumber } from "@/components/Confidence";
 import { MarginBleedBadge, TierBars } from "@/components/TokenBleed";
 import { StartSunset } from "@/components/StartSunset";
 import { ClassBadge, ErrorBox, Kpi, SectionTitle } from "@/components/ui";
@@ -95,6 +96,11 @@ export default async function FeaturePage({ params }: { params: Promise<{ key: s
           </div>
         </section>
       )}
+
+      <section className="card p-5">
+        <SectionTitle title="Why this number?" sub="How every line is computed, from which data, and how much of it is measured rather than modelled" />
+        <WhyThisNumber featureKey={key} />
+      </section>
 
       <section className="card p-5">
         <SectionTitle title="Cost and value by month" sub="Direct cost stacked by type; the line is usage-weighted attributed value" />

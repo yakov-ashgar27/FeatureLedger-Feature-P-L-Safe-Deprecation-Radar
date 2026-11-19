@@ -100,6 +100,12 @@ async def ledger(period: str | None = None, model: Model = "usage_weighted",
             "months": n, "archived": cur["status"] == "archived",
         })
     out.sort(key=lambda x: x["net_roi"])
+    from ..reports.confidence import confidence_by_feature
+    async with org_tx(org) as conn:
+        conf = await confidence_by_feature(conn, end)
+    for x in out:
+        c = conf.get(x["key"])
+        x["confidence"] = {"level": c["level"], "score": c["score"], "reasons": c["reasons"]} if c else None
     archived = [x for x in out if x["archived"]]
     out = [x for x in out if not x["archived"]]
     product = [x for x in out if not x["is_shared_overhead"]]
@@ -269,3 +275,45 @@ async def ai_margin(months: int = Query(6, ge=1, le=24), org: str = Depends(curr
     return {"thresholds": {"min_adoption": plain(thresholds["margin_bleed_min_adoption"]) if thresholds else 0.15,
                            "max_gross_margin": plain(thresholds["margin_bleed_max_gross_margin"]) if thresholds else 0.2},
             "features": feats}
+
+
+@router.get("/features/{key}/explain")
+async def explain(key: str, period: str | None = None, org: str = Depends(current_org)):
+    """Why this number: how each cost and value line is computed, from which data, and how sure it is."""
+    from ..reports.confidence import assess, load_evidence
+    p = parse_period(period)
+    async with org_tx(org) as conn:
+        ev = (await load_evidence(conn, p)).get(key)
+        if ev is None:
+            raise HTTPException(404, "no P&L row for this feature and month")
+        s = await conn.fetchrow("""SELECT eng_hourly_rate_usd, support_hourly_rate_usd FROM org_settings""")
+        row_ = await conn.fetchrow("""SELECT p.period_month, p.eng_hours, p.tickets, p.c_total, p.classification::text AS cls,
+                                             p.classification_reason FROM feature_pnl_monthly p JOIN features f ON f.id = p.feature_id
+                                       WHERE f.key = $1 AND p.period_month = coalesce($2::date,
+                                             (SELECT max(period_month) FROM feature_pnl_monthly))""", key, p)
+    c = assess(ev)
+    eng_rate, sup_rate = plain(s["eng_hourly_rate_usd"]), plain(s["support_hourly_rate_usd"])
+    lines = [
+        {"line": "Engineering", "amount": plain(ev["c_eng"]),
+         "how": f"{plain(row_['eng_hours']):,.0f} h x ${eng_rate:,.0f}/h. Hours = each merged PR's relative effort "
+                "(size, files, review rounds, kind), scaled so every team's month adds up to its real capacity, "
+                "split across features by the code each PR touched.",
+         "measured": c["coverage"]["eng_declared_share"], "measured_label": "from declared mappings"},
+        {"line": "Support", "amount": plain(ev["c_support"]),
+         "how": f"{row_['tickets']} ticket(s) x handle time x ${sup_rate:,.0f}/h.",
+         "measured": c["coverage"]["support_measured_share"], "measured_label": "with measured handle time"},
+        {"line": "Cloud infra", "amount": plain(ev["c_infra"]),
+         "how": "Cost lines tagged to the feature, plus its usage share of untagged spend.",
+         "measured": c["coverage"]["infra_tagged_share"], "measured_label": "tagged directly"},
+        {"line": "AI tokens", "amount": plain(ev["c_ai_tokens"]),
+         "how": "LLM/AI usage cost lines tagged to the feature.", "measured": None, "measured_label": None},
+        {"line": "Value (usage-weighted)", "amount": plain(ev["v_usage"]),
+         "how": "Each paying account's MRR, split across the features it used this month in proportion to its "
+                "usage events. A modelling choice: compare with the tier-gated figure.",
+         "measured": None, "measured_label": None},
+        {"line": "Value (tier-gated)", "amount": plain(ev["v_tier"]),
+         "how": "MRR of the plan tiers that include the feature, blended by adoption.",
+         "measured": None, "measured_label": None},
+    ]
+    return {"key": key, "period": row_["period_month"].isoformat()[:7], "classification": row_["cls"],
+            "classification_reason": row_["classification_reason"], "lines": lines, "confidence": c}
