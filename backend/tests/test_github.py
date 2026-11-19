@@ -81,3 +81,24 @@ def test_pr_title_is_used_for_kind_but_never_stored():
     n = normalize_pr("acme/web", pr, FILES, REVIEWS, MANIFEST)
     assert n.kind is WorkKind.HOTFIX
     assert "Jane" not in json.dumps(n.__dict__, default=str) and "auth loop" not in json.dumps(n.__dict__, default=str)
+
+
+RAW_COMMIT = {
+    "sha": "4eb5b6f0123456789abcdef0123456789abcdef0", "parents": [{"sha": "c05559e"}],
+    "commit": {"message": "fix(pdf): clear the margin cache (DOC-4411)\n\nReported by alice@example.com",
+               "author": {"name": "Alice", "email": "alice@example.com", "date": "2026-11-15T10:00:00Z"},
+               "committer": {"name": "Alice", "email": "alice@example.com", "date": "2026-11-15T10:05:00Z"}},
+    "author": {"login": "alice"},
+    "files": FILES,
+}
+
+
+def test_direct_commit_is_a_work_item_without_identity_or_message():
+    from app.ingest.github import normalize_commit
+    n = normalize_commit("acme/app", RAW_COMMIT, MANIFEST)
+    assert n.external_id == "acme/app@4eb5b6f01234" and n.kind is WorkKind.BUG and n.review_rounds == 0
+    assert n.merged_at == n.opened_at == "2026-11-15T10:05:00Z" and n.linked_keys == ["DOC-4411"]
+    assert set(n.allocations) == {"legacy-pdf-export", "editor"} and n.raw_effort_hours > 0
+    stored = json.dumps(n.__dict__, default=str)
+    for leaked in ("alice", "Alice", "margin cache", "secret code"):
+        assert leaked not in stored

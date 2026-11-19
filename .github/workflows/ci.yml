@@ -76,6 +76,13 @@ jobs:
           DATABASE_URL: postgresql://featureledger_app:app_dev_password@localhost:5432/featureledger
           ADMIN_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/featureledger
         run: cd backend && python -m pytest tests/test_hardening_api.py -v
+      - name: "GitHub direct pushes: counted once, PR commits and merges skipped"
+        env:
+          FL_INTEGRATION: "1"
+          SANDBOX_MODE: "true"
+          DATABASE_URL: postgresql://featureledger_app:app_dev_password@localhost:5432/featureledger
+          ADMIN_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/featureledger
+        run: cd backend && python -m pytest tests/test_github_commits_api.py -v
 
   web:
     runs-on: ubuntu-latest

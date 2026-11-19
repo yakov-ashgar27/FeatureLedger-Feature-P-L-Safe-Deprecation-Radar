@@ -5,6 +5,9 @@ Flow per repository
   2. For merged PRs: fetch files (paginated, max 3,000 per GitHub) and reviews.
   3. Scrub (allowlist) -> normalize -> envelope with idempotency key -> inbox upsert.
   4. Upsert `work_items` + `work_item_allocations` from the manifest; advance the cursor last.
+  5. Commits pushed straight to the default branch (no pull request) are ingested the same way, as work
+     items of type 'commit'. Merge commits and commits that belong to any pull request are skipped, so
+     work is never counted twice. The commit message is read for the kind (fix/feat/...) and never stored.
 Network I/O lives in `GitHubClient`; everything else is pure and unit-tested.
 """
 from __future__ import annotations
@@ -21,7 +24,7 @@ from typing import Any, AsyncIterator
 from ..core.effort import raw_effort_hours
 from ..core.manifest import Manifest
 from ..core.types import WorkKind
-from .scrub import scrub_files, scrub_pr, scrub_reviews
+from .scrub import ISSUE_KEY_RE, scrub_files, scrub_pr, scrub_reviews
 
 SWEEPING_MIN_FEATURES = 50
 SWEEPING_MIN_LINES = 5_000
@@ -115,6 +118,37 @@ def normalize_pr(repo: str, pr: dict[str, Any], files: list[dict[str, Any]], rev
     )
 
 
+def normalize_commit(repo: str, commit: dict[str, Any], manifest: Manifest) -> NormalizedPR:
+    """A commit from GET /repos/{repo}/commits/{sha} (with `files`). Author and message are not kept."""
+    sha = commit["sha"]
+    message = ((commit.get("commit") or {}).get("message") or "")
+    first_line = message.split("\n", 1)[0]
+    when = ((commit.get("commit") or {}).get("committer") or {}).get("date") \
+        or ((commit.get("commit") or {}).get("author") or {}).get("date")
+    fs = scrub_files(commit.get("files") or [])
+    kind, prio = classify_kind([], first_line)
+    path_stats = [{"path": f["filename"], "additions": int(f.get("additions", 0)),
+                   "deletions": int(f.get("deletions", 0))} for f in fs]
+    counted = [x for x in path_stats if not manifest.is_ignored(x["path"])]
+    adds = sum(x["additions"] for x in counted)
+    dels = sum(x["deletions"] for x in counted)
+    shares, _ = manifest.allocate_paths(path_stats)
+    sweeping = len(shares) > SWEEPING_MIN_FEATURES or adds + dels > SWEEPING_MIN_LINES
+    owner_team = None
+    if shares:
+        top = max(shares.items(), key=lambda kv: kv[1])[0]
+        owner_team = manifest.by_key()[top].owner_team
+    ref = f"{repo}@{sha[:12]}"
+    return NormalizedPR(
+        external_id=ref, title_for_triage=ref, kind=kind, priority=prio, opened_at=when, merged_at=when,
+        additions=adds, deletions=dels, files_changed=len(counted), review_rounds=0,
+        is_revert=kind is WorkKind.REVERT, is_sweeping=sweeping, labels=[],
+        linked_keys=sorted(set(ISSUE_KEY_RE.findall(message))), path_stats=path_stats, allocations=shares,
+        owner_team_key=owner_team,
+        raw_effort_hours=round(raw_effort_hours(adds, dels, len(counted), 0, kind, prio), 2),
+    )
+
+
 def parse_next_link(link_header: str | None) -> str | None:
     if not link_header:
         return None
@@ -176,6 +210,22 @@ class GitHubClient:
     async def pr_reviews(self, repo: str, number: int) -> list[dict[str, Any]]:
         return [r async for r in self.paginate(f"/repos/{repo}/pulls/{number}/reviews", {"per_page": 100})]
 
+    async def default_branch(self, repo: str) -> str:
+        return (await self._get(f"/repos/{repo}")).json().get("default_branch") or "main"
+
+    async def branch_commits(self, repo: str, branch: str, since_iso: str | None) -> AsyncIterator[dict[str, Any]]:
+        params: dict[str, Any] = {"sha": branch, "per_page": 100}
+        if since_iso:
+            params["since"] = since_iso
+        async for c in self.paginate(f"/repos/{repo}/commits", params):
+            yield c
+
+    async def commit_detail(self, repo: str, sha: str) -> dict[str, Any]:
+        return (await self._get(f"/repos/{repo}/commits/{sha}")).json()
+
+    async def commit_has_pull_request(self, repo: str, sha: str) -> bool:
+        return bool((await self._get(f"/repos/{repo}/commits/{sha}/pulls", {"per_page": 1})).json())
+
 
 # ------------------------------------------------------------------ persistence
 async def sync_repository(conn, org_id: str, integration_id: str, repo: str, client: GitHubClient,
@@ -222,18 +272,58 @@ async def sync_repository(conn, org_id: str, integration_id: str, repo: str, cli
             """INSERT INTO sync_cursors (integration_id, org_id, entity_type, cursor) VALUES ($1, $2, $3, $4)
                ON CONFLICT (integration_id, entity_type) DO UPDATE SET cursor = EXCLUDED.cursor, updated_at = now()""",
             integration_id, org_id, entity, newest)
+
+    # direct pushes to the default branch
+    stats.update(direct_commits=0, commits_in_prs=0)
+    centity = f"commit:{repo}"
+    ccursor = await conn.fetchval(
+        "SELECT cursor FROM sync_cursors WHERE integration_id = $1 AND entity_type = $2", integration_id, centity)
+    cnewest = ccursor
+    branch = await client.default_branch(repo)
+    async for c in client.branch_commits(repo, branch, ccursor):
+        when = ((c.get("commit") or {}).get("committer") or {}).get("date")
+        if when:
+            cnewest = max(cnewest or "", when)
+        if len(c.get("parents") or []) > 1:
+            continue                                   # a merge commit: its work arrives with its PR
+        if await client.commit_has_pull_request(repo, c["sha"]):
+            stats["commits_in_prs"] += 1
+            continue
+        detail = await client.commit_detail(repo, c["sha"])
+        n = normalize_commit(repo, detail, manifest)
+        if vault is not None and not n.allocations and not n.is_sweeping:
+            vault.put("github_pr", n.external_id, ((detail.get("commit") or {}).get("message") or "")[:1000])
+        key = idempotency_key(integration_id, "commit", n.external_id, c["sha"])
+        inserted = await conn.fetchval(
+            """INSERT INTO ingest_inbox (idempotency_key, org_id, integration_id, entity_type, external_id, payload,
+                                         processed_at)
+               VALUES ($1, $2, $3, 'commit', $4, $5, now())
+               ON CONFLICT (idempotency_key) DO NOTHING RETURNING 1""",
+            key, org_id, integration_id, n.external_id, json.loads(json.dumps(n.__dict__, default=str)))
+        if not inserted:
+            stats["duplicates"] += 1
+            continue
+        await upsert_work_item(conn, org_id, repo_id, n, teams.get(n.owner_team_key or default_team_key or ""),
+                               feature_ids, item_type="commit")
+        stats["direct_commits"] += 1
+    if cnewest and cnewest != ccursor:
+        await conn.execute(
+            """INSERT INTO sync_cursors (integration_id, org_id, entity_type, cursor) VALUES ($1, $2, $3, $4)
+               ON CONFLICT (integration_id, entity_type) DO UPDATE SET cursor = EXCLUDED.cursor, updated_at = now()""",
+            integration_id, org_id, centity, cnewest)
     await conn.execute("UPDATE integrations SET last_synced_at = now(), status = 'active', last_error = NULL "
                        "WHERE id = $1", integration_id)
     return stats
 
 
-async def upsert_work_item(conn, org_id: str, repo_id, n: NormalizedPR, team_id, feature_ids: dict[str, Any]) -> None:
+async def upsert_work_item(conn, org_id: str, repo_id, n: NormalizedPR, team_id, feature_ids: dict[str, Any],
+                           item_type: str = "pr") -> None:
     wid = await conn.fetchval(
         """INSERT INTO work_items (org_id, source, external_id, item_type, kind, priority, team_id, repo_id,
                                    opened_at, merged_at, additions, deletions, files_changed, review_rounds,
                                    is_revert, is_sweeping, raw_effort_hours, path_stats, linked_keys, labels)
-           VALUES ($1, 'github', $2, 'pr', $3::work_kind, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-                   $16, $17, $18)
+           VALUES ($1, 'github', $2, $19::work_item_type, $3::work_kind, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+                   $14, $15, $16, $17, $18)
            ON CONFLICT (org_id, source, external_id) DO UPDATE SET
                kind = EXCLUDED.kind, priority = EXCLUDED.priority, team_id = EXCLUDED.team_id,
                merged_at = EXCLUDED.merged_at, additions = EXCLUDED.additions, deletions = EXCLUDED.deletions,
@@ -246,7 +336,7 @@ async def upsert_work_item(conn, org_id: str, repo_id, n: NormalizedPR, team_id,
         datetime.fromisoformat(n.opened_at.replace("Z", "+00:00")),
         datetime.fromisoformat(n.merged_at.replace("Z", "+00:00")) if n.merged_at else None,
         n.additions, n.deletions, n.files_changed, n.review_rounds, n.is_revert, n.is_sweeping,
-        n.raw_effort_hours, n.path_stats, n.linked_keys, n.labels)
+        n.raw_effort_hours, n.path_stats, n.linked_keys, n.labels, item_type)
     await conn.execute("DELETE FROM work_item_allocations WHERE work_item_id = $1", wid)
     rows = [(wid, feature_ids[k], org_id, share) for k, share in n.allocations.items() if k in feature_ids]
     if rows:
