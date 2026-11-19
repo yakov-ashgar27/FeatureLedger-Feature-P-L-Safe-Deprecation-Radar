@@ -20,6 +20,12 @@ log = logging.getLogger("featureledger.demo")
 DEMO_NS = uuid.UUID("2d0c3d6e-6a0f-4c55-9d44-5ad3c0de0a01")
 UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 DEMO_LABEL = "Launch Live Demo ({name} — {engineers} Engineers)"
+ORPHAN_TABLES_SQL = """
+    SELECT c.relname FROM pg_class c JOIN pg_attribute a ON a.attrelid = c.oid AND a.attname = 'org_id'
+     WHERE c.relkind IN ('r', 'p') AND c.relnamespace = 'public'::regnamespace AND NOT c.relispartition
+       AND c.relname <> 'organizations'
+       AND NOT EXISTS (SELECT 1 FROM pg_constraint k WHERE k.conrelid = c.oid AND k.contype = 'f'
+                                                      AND k.confrelid = 'organizations'::regclass)"""
 
 
 def demo_id(seed_id: str) -> str:
@@ -58,6 +64,9 @@ async def reset_demo(dsn: str | None = None) -> dict:
                     raise RuntimeError(f"organization {config.demo_org_slug!r} is a real tenant; refusing to reset it")
                 await conn.execute("SELECT set_config('featureledger.purge_org', $1, true)", str(r["id"]))
                 await conn.execute("DELETE FROM sunset_audit_logs WHERE org_id = $1", r["id"])
+                # partitioned fact tables carry org_id without a foreign key: the cascade cannot reach them
+                for t in await conn.fetch(ORPHAN_TABLES_SQL):
+                    await conn.execute(f'DELETE FROM "{t["relname"]}" WHERE org_id = $1', r["id"])
                 await conn.execute("DELETE FROM organizations WHERE id = $1", r["id"])
             await conn.execute(sql)
             await conn.execute("UPDATE organizations SET is_demo = true WHERE id = $1::uuid", org_id)
