@@ -18,7 +18,7 @@ from .structural_inference import infer
 
 async def run_structural(conn, org_id: str, resolver) -> dict[str, Any]:
     rows = await conn.fetch("""SELECT path_stats FROM work_items
-                                WHERE item_type = 'pr' AND NOT is_sweeping AND jsonb_array_length(path_stats) > 0""")
+                                WHERE item_type IN ('pr', 'commit') AND NOT is_sweeping AND jsonb_array_length(path_stats) > 0""")
     pr_paths = [[p["path"] for p in r["path_stats"]] for r in rows]
     files = {p for paths in pr_paths for p in paths}
     edges = [(r["from_path"], r["to_path"]) for r in await conn.fetch("SELECT from_path, to_path FROM import_edges")]

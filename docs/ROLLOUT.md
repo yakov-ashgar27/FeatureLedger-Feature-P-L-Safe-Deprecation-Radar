@@ -44,7 +44,12 @@ Sync on Windows: `powershell -ExecutionPolicy Bypass -File .\scripts\sync-github
    (migration `0011_direct_commits.sql`, `app/ingest/github.py`); merge commits and commits that belong to any PR
    are skipped so nothing is counted twice. Tested against real Postgres with a fake GitHub
    (`tests/test_github_commits_api.py`).
-4. *No `make` on Windows.* `scripts/sync-github.ps1` does the sync and prints the ledger with PowerShell only.
+4. *Commits were stored but not counted: engineering cost $0 on every feature.* The ingest change in (3) was
+   incomplete: the P&L loader, the manifest re-allocation, the Tier 2/3 classifiers and the Jira link checks still
+   read `item_type = 'pr'` only. A diagnostic query (`diag.sql`: teams, work items with allocations, capacity) showed
+   10 commits correctly mapped and `raw_hours = 0` in the capacity row. All readers now take `('pr', 'commit')`, and
+   the integration test now checks that the P&L loader sees the commit, not just that it was stored.
+5. *No `make` on Windows.* `scripts/sync-github.ps1` does the sync and prints the ledger with PowerShell only.
 
 **Still to do in Stage 1:** check the ledger and tear-sheets on the real data; Zombie-Guard comments and a
 cleanup PR on a test branch of the product repository.

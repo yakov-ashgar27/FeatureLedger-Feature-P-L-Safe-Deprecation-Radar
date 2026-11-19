@@ -211,7 +211,7 @@ async def collect_items(conn, vault: TextVault) -> list[TextItem]:
     prs = vault.keys("github_pr")
     if prs:
         for r in await conn.fetch("""SELECT w.id, w.external_id FROM work_items w
-                                      WHERE w.item_type = 'pr' AND NOT w.is_sweeping AND w.external_id = ANY($1)
+                                      WHERE w.item_type IN ('pr', 'commit') AND NOT w.is_sweeping AND w.external_id = ANY($1)
                                         AND NOT EXISTS (SELECT 1 FROM work_item_allocations a WHERE a.work_item_id = w.id)""",
                                    prs):
             if ("work_item", str(r["id"])) not in decided:
@@ -222,7 +222,7 @@ async def collect_items(conn, vault: TextVault) -> list[TextItem]:
         for r in await conn.fetch("""
             SELECT i.id, i.external_id FROM work_items i
              WHERE i.source = 'jira' AND i.item_type = 'issue' AND i.external_id = ANY($1)
-               AND EXISTS (SELECT 1 FROM work_items pr WHERE pr.item_type = 'pr' AND i.external_id = ANY(pr.linked_keys)
+               AND EXISTS (SELECT 1 FROM work_items pr WHERE pr.item_type IN ('pr', 'commit') AND i.external_id = ANY(pr.linked_keys)
                              AND NOT pr.is_sweeping
                              AND NOT EXISTS (SELECT 1 FROM work_item_allocations a WHERE a.work_item_id = pr.id))""",
                 issues):
@@ -312,6 +312,6 @@ async def _apply(conn, org_id: str, c: Classification, fid) -> None:
         await conn.execute("""
             INSERT INTO work_item_allocations (work_item_id, feature_id, org_id, share, source)
             SELECT pr.id, $2, $3, 1, 'ai' FROM work_items pr
-             WHERE pr.item_type = 'pr' AND $1 = ANY(pr.linked_keys) AND NOT pr.is_sweeping
+             WHERE pr.item_type IN ('pr', 'commit') AND $1 = ANY(pr.linked_keys) AND NOT pr.is_sweeping
                AND NOT EXISTS (SELECT 1 FROM work_item_allocations x WHERE x.work_item_id = pr.id)""",
             a["key"], fid, org_id)

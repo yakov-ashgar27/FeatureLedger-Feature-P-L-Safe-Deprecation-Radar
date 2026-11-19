@@ -101,7 +101,7 @@ async def decide(suggestion_id: str, body: Decision, org: str = Depends(org_for(
                                       mapping_confidence = 1 WHERE id = $1""", sid, fid)
             elif st == "work_item":
                 pr_ids = [sid] if not is_issue else [r["id"] for r in await conn.fetch(
-                    "SELECT id FROM work_items WHERE item_type = 'pr' AND $1 = ANY(linked_keys)", issue_key)]
+                    "SELECT id FROM work_items WHERE item_type IN ('pr', 'commit') AND $1 = ANY(linked_keys)", issue_key)]
                 await conn.execute("DELETE FROM work_item_allocations WHERE work_item_id = ANY($1::uuid[])", pr_ids)
                 await conn.executemany("""INSERT INTO work_item_allocations (work_item_id, feature_id, org_id, share, source)
                                           VALUES ($1, $2, $3, 1, 'human')""", [(p, fid, org) for p in pr_ids])

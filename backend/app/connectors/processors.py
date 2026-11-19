@@ -163,20 +163,20 @@ async def _jira(conn, org_id: str, envs: list[dict], manifest: Manifest, failed:
     await conn.execute("""
         UPDATE work_items pr SET kind = iss.kind, priority = coalesce(pr.priority, iss.priority)
           FROM work_items iss
-         WHERE iss.source = 'jira' AND iss.item_type = 'issue' AND pr.item_type = 'pr'
+         WHERE iss.source = 'jira' AND iss.item_type = 'issue' AND pr.item_type IN ('pr', 'commit')
            AND iss.external_id = ANY(pr.linked_keys) AND iss.kind IN ('bug', 'incident')
            AND pr.kind IN ('feature', 'chore')""")
     await conn.execute("""
         UPDATE work_items pr SET priority = iss.priority
           FROM work_items iss
-         WHERE iss.source = 'jira' AND iss.item_type = 'issue' AND pr.item_type = 'pr' AND pr.priority IS NULL
+         WHERE iss.source = 'jira' AND iss.item_type = 'issue' AND pr.item_type IN ('pr', 'commit') AND pr.priority IS NULL
            AND iss.external_id = ANY(pr.linked_keys) AND iss.priority IN ('P0', 'P1')""")
     if labelled:
         fids = {r["key"]: r["id"] for r in await conn.fetch("SELECT id, key FROM features")}
         await conn.executemany("""
             INSERT INTO work_item_allocations (work_item_id, feature_id, org_id, share)
             SELECT w.id, $2, $3, 1 FROM work_items w
-             WHERE w.item_type = 'pr' AND $1 = ANY(w.linked_keys)
+             WHERE w.item_type IN ('pr', 'commit') AND $1 = ANY(w.linked_keys)
                AND NOT EXISTS (SELECT 1 FROM work_item_allocations a WHERE a.work_item_id = w.id)
             ON CONFLICT DO NOTHING""", [(k, fids[f], org_id) for k, f in labelled if f in fids])
 

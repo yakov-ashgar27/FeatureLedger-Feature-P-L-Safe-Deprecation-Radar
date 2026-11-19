@@ -77,6 +77,15 @@ def test_direct_commits_are_counted_once_and_prs_are_not_double_counted():
                     (f"{REPO}@{'a' * 12}", "commit", "bug", "legacy-pdf-export")]
                 again = await sync_repository(conn, org, str(integ), REPO, gh, manifest)   # cursor: nothing new
                 assert again["direct_commits"] == 0 and gh.calls == ["a" * 40]
+
+                # ...and the P&L actually counts it (regression: the first real run stored commits that every
+                # reader filtered out with item_type = 'pr', so engineering cost stayed $0)
+                from datetime import date
+                from app.jobs.compute_pnl import load_dataset
+                ds = await load_dataset(conn, [date(2026, 11, 1)])
+                mine = [w for w in ds.work_items if w.id in {str(r["id"]) for r in await conn.fetch(
+                    "SELECT id FROM work_items WHERE external_id LIKE $1", REPO + "@%")}]
+                assert len(mine) == 1 and mine[0].allocations
         finally:
             async with org_tx(org) as conn:
                 await conn.execute("DELETE FROM work_items WHERE external_id LIKE $1", REPO + "@%")

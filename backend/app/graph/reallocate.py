@@ -29,10 +29,10 @@ async def reallocate(conn, org_id: str, resolver: EffectiveResolver) -> dict[str
         SELECT w.id, w.path_stats, w.is_sweeping,
                coalesce((SELECT jsonb_agg(jsonb_build_object('f', a.feature_id, 's', a.share, 'src', a.source))
                            FROM work_item_allocations a WHERE a.work_item_id = w.id), '[]'::jsonb) AS alloc
-          FROM work_items w WHERE w.item_type = 'pr'""")
+          FROM work_items w WHERE w.item_type IN ('pr', 'commit')""")
     decided = {str(r["id"]) for r in await conn.fetch("""
         SELECT w.id FROM work_items w
-         WHERE w.item_type = 'pr' AND EXISTS (
+         WHERE w.item_type IN ('pr', 'commit') AND EXISTS (
                SELECT 1 FROM mapping_suggestions s JOIN work_items x ON x.id = s.subject_id
                 WHERE s.subject_type = 'work_item' AND s.decided_at IS NOT NULL AND s.status = 'confirmed'
                   AND (x.id = w.id OR x.external_id = ANY(w.linked_keys)))""")}

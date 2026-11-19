@@ -62,7 +62,7 @@ async def load_dataset(conn: asyncpg.Connection, months: list[date]) -> Dataset:
                       WHERE a.work_item_id = w.id) AS alloc
           FROM work_items w
          WHERE w.period_month = ANY($1::date[]) AND w.team_id IS NOT NULL
-           AND (w.item_type = 'pr' AND w.merged_at IS NOT NULL)""", months)]
+           AND (w.item_type IN ('pr', 'commit') AND w.merged_at IS NOT NULL)""", months)]
     accounts_by_month: dict[date, list[Account]] = defaultdict(list)
     for r in await conn.fetch("""
         SELECT s.period_month, a.id, a.name, s.plan_tier, s.arr_usd, a.renewal_date, s.health
