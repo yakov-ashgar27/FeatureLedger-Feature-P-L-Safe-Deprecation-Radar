@@ -74,7 +74,8 @@ for i in kinds:      # one at a time, as a person clicking "Trigger Sync" would
 def ledger_fingerprint(l):
     """Every number the ledger shows, per feature, rounded to the cent: equality must be exact."""
     rows = {f["key"]: (f["classification"], f["margin_bleed"], *(round(float(f[k] or 0), 2) for k in
-            ("c_eng", "c_support", "c_infra", "c_ai_tokens", "c_total", "v_usage", "eng_hours", "adoption")))
+            ("c_eng", "c_support", "c_infra", "c_ai_tokens", "c_total", "value", "net_roi", "eng_hours", "adoption",
+             "tickets", "revenue_at_risk_arr")))
             for f in l["features"]}
     return l["summary"], rows
 
