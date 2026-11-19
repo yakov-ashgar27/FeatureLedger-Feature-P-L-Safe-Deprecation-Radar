@@ -201,12 +201,13 @@ def test_scream_test_guards_then_cleanup_pr_then_merge_archives(client, tokens):
     assert client.post("/api/v1/flags/zapier-v1/evaluations", json={"reset": True}, headers=A).json()["removed_buckets"] >= 1
 
     # 2) a customer ticket during the scream test -> 409 customer_screamed
-    fid = admin_sql("SELECT id, org_id FROM features WHERE key = 'zapier-v1-webhooks'")[0]
+    fid = admin_sql("""SELECT f.id, f.org_id FROM features f JOIN organizations o ON o.id = f.org_id
+                     WHERE f.key = 'zapier-v1-webhooks' AND o.slug = 'northwind'""")[0]
     admin_sql("""INSERT INTO support_tickets (org_id, external_id, feature_id, mapping_source, created_at)
                  VALUES ($1, 'ci-scream-1', $2, 'human', now())""", fid["org_id"], fid["id"])
     r = client.post(f"/api/v1/sunset-plans/{zap}/advance", json={}, headers=A)
     assert r.status_code == 409 and r.json()["detail"]["code"] == "customer_screamed"
-    admin_sql("DELETE FROM support_tickets WHERE external_id = 'ci-scream-1'")
+    admin_sql("DELETE FROM support_tickets WHERE external_id = 'ci-scream-1' AND org_id = $1", fid["org_id"])
 
     # 3) quiet: an admin approves -> the cleanup PR is opened on sunset/<feature_key>
     r = client.post(f"/api/v1/sunset-plans/{zap}/advance", json={}, headers=A)
@@ -238,7 +239,8 @@ def test_scream_test_guards_then_cleanup_pr_then_merge_archives(client, tokens):
     assert final["pull_requests"][0]["state"] == "merged"
     last = final["audit_log"][-1]
     assert last["to_state"] == "archived" and last["payload"]["actor"] == "github-webhook"
-    assert admin_sql("SELECT status::text FROM features WHERE key = 'zapier-v1-webhooks'")[0]["status"] == "archived"
+    assert admin_sql("""SELECT f.status::text FROM features f JOIN organizations o ON o.id = f.org_id
+                        WHERE f.key = 'zapier-v1-webhooks' AND o.slug = 'northwind'""")[0]["status"] == "archived"
     # replaying the webhook is harmless
     again = client.post(f"/api/v1/webhooks/github/{integ['id']}", json=payload,
                         headers={"X-GitHub-Event": "pull_request", "X-FeatureLedger-Secret": "sandbox"})
