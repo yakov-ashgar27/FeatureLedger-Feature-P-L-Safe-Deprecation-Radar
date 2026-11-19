@@ -26,11 +26,16 @@ x-connector-env: &connector-env
   AWS_CE_TAG_KEY: ${AWS_CE_TAG_KEY:-feature}
   # Phase 3: Feature Graph (LLM optional: without a key a deterministic local embedder is used)
   LLM_API_KEY: ${LLM_API_KEY:-}
+  LLM_ALLOW_EXTERNAL: ${LLM_ALLOW_EXTERNAL:-false}
   LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
   LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
   EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
   GITHUB_TOKEN: ${GITHUB_TOKEN:-}
   GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+  # hardening: rate limits (shared through Redis), proxies trusted for X-Forwarded-For (1 = the dashboard)
+  RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
+  TRUSTED_PROXY_HOPS: ${TRUSTED_PROXY_HOPS:-1}
+  DEMO_RESET_COOLDOWN_S: ${DEMO_RESET_COOLDOWN_S:-60}
   # Phase 4: live flags + cleanup PRs (sandbox providers when unset)
   FLAG_PROVIDER: ${FLAG_PROVIDER:-}
   FLAG_ACCOUNT_KEY: ${FLAG_ACCOUNT_KEY:-external_ref}

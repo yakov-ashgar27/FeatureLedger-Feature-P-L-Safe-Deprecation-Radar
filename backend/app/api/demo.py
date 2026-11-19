@@ -79,6 +79,12 @@ async def reset(p: Principal = Depends(current_principal)):
     _enabled()
     if not (p.is_demo or p.kind == "service"):
         raise HTTPException(403, {"code": "not_demo", "message": "only the live demo can be reset"})
+    if p.kind != "service":       # a reset reloads the whole demo: one per cooldown for all visitors together
+        from ..core.ratelimit import limiter
+        ok, retry = await limiter().cooldown("demo-reset", max(1, config.demo_reset_cooldown_s))
+        if not ok:
+            raise HTTPException(429, {"code": "rate_limited", "message": f"the demo was just reset; try again in {retry}s"},
+                                headers={"Retry-After": str(retry)})
     try:
         out = await reset_demo()
     except RuntimeError as e:

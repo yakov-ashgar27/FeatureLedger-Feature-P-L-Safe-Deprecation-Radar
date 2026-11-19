@@ -69,6 +69,13 @@ jobs:
           DATABASE_URL: postgresql://featureledger_app:app_dev_password@localhost:5432/featureledger
           ADMIN_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/featureledger
         run: cd backend && python -m pytest tests/test_isolation_api.py -v
+      - name: "Hardening: session revocation, security headers, rate limits"
+        env:
+          FL_INTEGRATION: "1"
+          SANDBOX_MODE: "true"
+          DATABASE_URL: postgresql://featureledger_app:app_dev_password@localhost:5432/featureledger
+          ADMIN_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/featureledger
+        run: cd backend && python -m pytest tests/test_hardening_api.py -v
 
   web:
     runs-on: ubuntu-latest
@@ -77,6 +84,20 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: "22" }
       - run: cd web && npm install --no-audit --no-fund && npm run typecheck && npm run build
+
+  audit:
+    # known vulnerabilities in pinned dependencies (PyPI advisories via pip-audit, npm advisories)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: Python dependencies
+        run: pip install pip-audit && pip-audit -r backend/requirements.txt --desc
+      - name: npm dependencies (production, high and critical)
+        run: cd web && npm install --no-fund --package-lock-only && npm audit --omit=dev --audit-level=high
 
   e2e:
     # the full stack exactly as a user runs it: docker compose up, then real HTTP checks
@@ -199,6 +220,8 @@ jobs:
           done
           curl -fs -H "Cookie: fl_session=$TOKEN_VIEWER" http://localhost:3000/api/v1/periods
           test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/sunset)" = "307"
+          curl -sI -H "Cookie: fl_session=$TOKEN_VIEWER" http://localhost:3000/ | tee /tmp/h.txt | grep -i "content-security-policy"
+          grep -qi "frame-ancestors 'none'" /tmp/h.txt && grep -qi "x-frame-options: DENY" /tmp/h.txt && ! grep -qi "x-powered-by" /tmp/h.txt
       - name: "Phase 4 walkthrough: RBAC, live flag canary, scream guards, cleanup PR, merge webhook, rollback"
         run: python3 scripts/e2e_phase4.py http://localhost:3000
       - name: "Phase 5 walkthrough: zero-login demo, role switch, isolation, Trigger Sync, radar, Zombie-Guard, digest"

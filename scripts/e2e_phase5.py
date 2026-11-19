@@ -111,6 +111,11 @@ expect(s == 201 and dg["slack_status"] == "dry_run" and z["sunsets"] == 1 and z[
        f"digest: {z['sunsets']} sunset, {z['eng_hours_month']} h/mo, {z['fte']} FTE, ${z['cost_month']:,.0f}/mo reclaimed (Slack dry run)")
 s, html, _ = call("GET", "/api/v1/reports/executive-brief.html", cookie=PM)
 expect(s == 200 and b"Executive Brief" in html, "print-ready Executive Brief (HTML)")
-s, d, _ = call("POST", "/api/v1/demo/reset", cookie=PM)
+s, d, h = call("POST", "/api/v1/demo/reset", cookie=PM)
+if s == 429:                                   # the shared demo resets at most once per cooldown
+    wait = int(h.get("Retry-After", "60"))
+    print(f"  (reset cooldown: waiting {wait}s)")
+    time.sleep(wait + 1)
+    s, d, _ = call("POST", "/api/v1/demo/reset", cookie=PM)
 expect(s == 200, "reset the demo for the next visitor")
 print("\nPhase 5 walkthrough passed.")

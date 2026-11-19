@@ -24,6 +24,7 @@ from typing import Any
 
 from ..core.manifest import FeatureSpec, Manifest
 from .embeddings import Embedder, cosine, default_embedder, to_pgvector, words
+from .llm_policy import external_llm_allowed
 from .precedence import AUTO_CONFIRM
 
 log = logging.getLogger("featureledger.tier3")
@@ -134,7 +135,7 @@ class LLMRationale:
 
 def default_explainer(env: dict[str, str] | None = None):
     env = os.environ if env is None else env
-    if env.get("LLM_API_KEY"):
+    if external_llm_allowed(env):
         return LLMRationale(env["LLM_API_KEY"], env.get("LLM_BASE_URL", "https://api.openai.com/v1"),
                             env.get("LLM_MODEL", "gpt-4o-mini"))
     return TemplateRationale()

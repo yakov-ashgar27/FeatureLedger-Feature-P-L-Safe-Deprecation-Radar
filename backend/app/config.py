@@ -71,6 +71,14 @@ class Config:
     demo_mode: bool = field(default_factory=lambda: _bool(os.environ.get("DEMO_MODE"), False))
     demo_org_slug: str = field(default_factory=lambda: os.environ.get("DEMO_ORG_SLUG", "acme-demo"))
     demo_org_name: str = field(default_factory=lambda: os.environ.get("DEMO_ORG_NAME", "Acme Cloud"))
+    # a demo visitor may reset the shared demo at most once per this many seconds (FL_API_TOKEN is exempt)
+    demo_reset_cooldown_s: int = field(default_factory=lambda: int(os.environ.get("DEMO_RESET_COOLDOWN_S", "60")))
+
+    # ---------------------------------------------------------------- hardening
+    rate_limit_enabled: bool = field(default_factory=lambda: _bool(os.environ.get("RATE_LIMIT_ENABLED"), True))
+    rate_limit_redis: bool = field(default_factory=lambda: _bool(os.environ.get("RATE_LIMIT_REDIS"), True))
+    # proxies in front of the API that append to X-Forwarded-For (1 = the Next.js dashboard)
+    trusted_proxy_hops: int = field(default_factory=lambda: int(os.environ.get("TRUSTED_PROXY_HOPS", "0")))
 
     @property
     def dev_login_enabled(self) -> bool:

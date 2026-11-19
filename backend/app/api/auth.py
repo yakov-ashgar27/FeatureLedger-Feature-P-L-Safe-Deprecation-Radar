@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from ..auth.oidc import PRESETS, OIDCClient, OIDCError, OIDCSettings, httpx_client, parse_role_map, role_from_claims
 from ..auth.rbac import Role, matrix
 from ..auth.session import (COOKIE, Principal, current_principal, issue_session, principal_from_user, require,
-                            session_secret)
+                            revoke_sessions, session_secret)
 from ..auth.tokens import TokenError, sign_hs256, verify_hs256
 from ..config import config
 from ..db import auth_call, org_tx
@@ -140,9 +140,22 @@ async def me(p: Principal = Depends(current_principal)):
 
 
 @router.post("/auth/logout")
-async def logout(response: Response):
+async def logout(request: Request, response: Response):
+    """Sign out. Ends every session of this user (all browsers and copied tokens), not just this cookie.
+    Shared demo users are exempt: one visitor signing out must not end the others' demo."""
+    revoked = False
+    try:
+        from fastapi.security import HTTPAuthorizationCredentials
+        auth = request.headers.get("authorization", "")
+        creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=auth[7:]) if auth[:7].lower() == "bearer " else None
+        p = await current_principal(request, creds, None)
+        if p.kind == "user" and p.user_id and not p.is_demo:
+            await revoke_sessions(p.org_id, p.user_id)
+            revoked = True
+    except HTTPException:
+        pass                      # already signed out / expired: just clear the cookie
     response.delete_cookie(COOKIE, path="/")
-    return {"ok": True}
+    return {"ok": True, "sessions_revoked": revoked}
 
 
 @router.get("/auth/rbac")
@@ -178,4 +191,18 @@ async def update_user(user_id: str, body: UserPatch, p: Principal = Depends(requ
                                 user_id, body.role, body.disabled)
         if not r:
             raise HTTPException(404, "user not found")
+        if body.role is not None or body.disabled:
+            await conn.execute("UPDATE users SET session_epoch = session_epoch + 1 WHERE id = $1::uuid", user_id)
     return row(r)
+
+
+@router.post("/users/{user_id}/revoke-sessions")
+async def revoke_user_sessions(user_id: str, p: Principal = Depends(require("users:manage"))):
+    """Sign a user out everywhere (lost laptop, leaked token)."""
+    if p.is_demo:
+        raise HTTPException(409, "users are fixed in the live demo")
+    async with org_tx(p.org_id) as conn:
+        if not await conn.fetchval("SELECT 1 FROM users WHERE id = $1::uuid", user_id):
+            raise HTTPException(404, "user not found")
+    await revoke_sessions(p.org_id, user_id)
+    return {"ok": True}

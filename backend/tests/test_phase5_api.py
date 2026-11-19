@@ -146,6 +146,8 @@ def test_demo_launch_switch_and_isolation(client):
     real_ledger = client.get("/api/v1/pnl?window=3", headers=H(real)).json()
     r = client.post("/api/v1/demo/reset", headers=H(t))
     assert r.status_code == 200, r.text
+    again = client.post("/api/v1/demo/reset", headers=H(t))      # one reset per cooldown for all visitors
+    assert again.status_code == 429 and int(again.headers["retry-after"]) >= 1, again.text
     after = client.get("/api/v1/sunset-plans", headers=H(t)).json()
     assert {p["id"] for p in after} == {p["id"] for p in demo_plans}
     assert next(p for p in after if p["feature_key"] == "zapier-v1-webhooks")["state"] == "canary_dark_launch"

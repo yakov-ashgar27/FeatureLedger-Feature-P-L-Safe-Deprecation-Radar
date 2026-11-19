@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { NEEDS, ROLE_LABEL, useCan, useMe } from "@/components/Auth";
 import { ErrorBox, SectionTitle } from "@/components/ui";
-import { apiGet, apiPatch, apiPut } from "@/lib/api";
+import { apiGet, apiPatch, apiPost, apiPut } from "@/lib/api";
 import type { Role } from "@/lib/types";
 
 type Settings = Record<string, number | string>;
@@ -58,6 +58,11 @@ export default function SettingsPage() {
     setErr(null);
     try { await apiPatch(`/api/v1/users/${u.id}`, body); load(); } catch (e) { setErr((e as Error).message); }
   };
+  const revoke = async (u: User) => {
+    setErr(null);
+    try { await apiPost(`/api/v1/users/${u.id}/revoke-sessions`); setNote(`${u.email} was signed out on every device.`); }
+    catch (e) { setErr((e as Error).message); }
+  };
   const editable = can("settings:write");
 
   return (
@@ -102,6 +107,8 @@ export default function SettingsPage() {
                     {!(u.role in ROLE_LABEL) && <option value={u.role}>{u.role} (legacy)</option>}
                   </select>
                   <button className="btn text-xs" disabled={u.id === me?.id} onClick={() => patchUser(u, { disabled: !u.disabled })}>{u.disabled ? "Enable" : "Disable"}</button>
+                  <button className="btn text-xs" disabled={u.id === me?.id || u.disabled} title="Ends every session of this user (lost laptop, leaked token)"
+                    onClick={() => revoke(u)}>Sign out everywhere</button>
                 </div>
               </div>
             ))}

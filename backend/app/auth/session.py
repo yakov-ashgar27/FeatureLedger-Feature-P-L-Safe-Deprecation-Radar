@@ -5,6 +5,9 @@
     Authorization: Bearer <session jwt>   scripts, CI, the Next.js server forwarding the cookie
     Authorization: Bearer <FL_API_TOKEN>  machine credential = admin service principal (no user)
 
+Sessions are revocable: the token carries the user's session_epoch and every request compares it with
+the database, so sign-out (and disabling a user or changing their role) ends all of that user's sessions.
+
 The tenant always comes from the user's record in the database, never from a header the caller sends.
 """
 from __future__ import annotations
@@ -70,7 +73,8 @@ class Principal:
 
 
 def issue_session(user: dict[str, Any], method: str) -> str:
-    return sign_hs256({"typ": "session", "sub": str(user["id"]), "org": str(user["org_id"]), "amr": method},
+    return sign_hs256({"typ": "session", "sub": str(user["id"]), "org": str(user["org_id"]), "amr": method,
+                       "ep": int(user.get("session_epoch") or 0)},
                       session_secret(), config.session_ttl_hours * 3600)
 
 
@@ -114,7 +118,16 @@ async def current_principal(request: Request,
     user = await auth_call("auth_get_user", claims["sub"])
     if not user or user["disabled"] or str(user["org_id"]) != claims.get("org"):
         raise HTTPException(401, {"code": "invalid_session", "message": "user no longer active"})
+    if int(claims.get("ep", 0)) != int(user.get("session_epoch") or 0):
+        raise HTTPException(401, {"code": "session_revoked", "message": "this session was signed out; sign in again"})
     return principal_from_user(user)
+
+
+async def revoke_sessions(org_id: str, user_id: str) -> None:
+    """End every session the user has (sign-out, disable, role change, 'sign out everywhere')."""
+    from ..db import org_tx
+    async with org_tx(org_id) as conn:
+        await conn.execute("UPDATE users SET session_epoch = session_epoch + 1 WHERE id = $1::uuid", user_id)
 
 
 def forbidden(p: Principal, permission: str) -> HTTPException:

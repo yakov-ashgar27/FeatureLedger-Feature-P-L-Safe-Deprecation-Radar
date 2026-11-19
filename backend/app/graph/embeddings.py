@@ -12,6 +12,8 @@ import os
 import re
 from typing import Protocol
 
+from .llm_policy import external_llm_allowed
+
 DIM = 1536
 WORD_RE = re.compile(r"[a-z][a-z0-9]+")
 STOP = {"the", "and", "for", "with", "from", "this", "that", "our", "your", "are", "was", "were", "has", "have",
@@ -83,7 +85,7 @@ class OpenAIEmbedder:
 
 def default_embedder(env: dict[str, str] | None = None) -> Embedder:
     env = os.environ if env is None else env
-    if env.get("LLM_API_KEY"):
+    if external_llm_allowed(env):
         return OpenAIEmbedder(env["LLM_API_KEY"], env.get("LLM_BASE_URL", "https://api.openai.com/v1"),
                               env.get("EMBEDDING_MODEL", "text-embedding-3-small"))
     return HashingEmbedder()
