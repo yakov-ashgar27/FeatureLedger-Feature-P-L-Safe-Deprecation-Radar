@@ -1,0 +1,32 @@
+name: demo screenshots
+# Manual: runs the stack, captures the live-demo screenshots used in README.md, and pushes them to the
+# `ci/screenshots` branch for review (it never writes to main).
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cp .env.example .env
+      - run: docker compose up --build -d
+      - name: wait for the demo
+        run: |
+          for i in $(seq 1 120); do
+            curl -fs http://localhost:3000/api/v1/demo/status | python3 -c "import json,sys; sys.exit(0 if json.load(sys.stdin).get('ready') else 1)" && break
+            sleep 5
+          done
+          sleep 20   # let the startup sync of the real tenant settle
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install --quiet playwright && python -m playwright install --with-deps chromium > /dev/null
+      - run: python scripts/screenshots.py http://localhost:3000 docs/img
+      - name: push to ci/screenshots
+        run: |
+          git config user.name "featureledger-ci"
+          git config user.email "ci@featureledger.invalid"
+          git checkout -b ci/screenshots
+          git add docs/img
+          git commit -m "Live demo screenshots ($(date -u +%F))"
+          git push -f origin ci/screenshots
