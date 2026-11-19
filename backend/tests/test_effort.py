@@ -67,3 +67,22 @@ def test_allocations_over_one_rejected():
     with pytest.raises(ValueError):
         allocate_effort([_wi(1, 10, {"a": 0.8, "b": 0.5})], [Team("t1", "c", "C", 3)],
                         [Feature("a", "a", "A"), Feature("b", "b", "B")], OrgSettings(), [M])
+
+
+def test_rounded_shares_never_exceed_the_exact_total_and_slightly_over_stored_shares_are_rescaled():
+    from app.core.manifest import round_shares
+    six = round_shares({k: 1 / 6 for k in "abcdef"})
+    assert abs(sum(six.values()) - 1.0) < 1e-12 and max(six.values()) - min(six.values()) <= 1.0001e-5
+    part = round_shares({"a": 0.333333, "b": 0.333333})            # 1/3 of the work unmapped stays unmapped
+    assert sum(part.values()) <= 0.666666 + 1e-9
+    # what the first real repository had stored: six shares rounded independently, summing to 1.00002
+    from datetime import date
+    from app.core.effort import allocate_effort
+    from app.core.types import Feature, OrgSettings, Team, WorkItem, WorkKind
+    m = date(2026, 11, 1)
+    feats = [Feature(id=k, key=k, name=k, owner_team_id="t") for k in "abcdef"]
+    wi = WorkItem(id="w", team_id="t", period_month=m, kind=WorkKind.FEATURE, priority=None, additions=500, deletions=0, review_rounds=0,
+                  files_changed=5, allocations={k: 0.16667 for k in "abcdef"})
+    out, cal = allocate_effort([wi], [Team(id="t", key="t", name="t", headcount=1)], feats, OrgSettings(), [m])
+    c = cal[(m, "t")]          # no crash, every calibrated hour lands on a feature, none unmapped or invented
+    assert abs(sum(e.hours for e in out.values()) - c.raw_hours * c.factor) < 1e-6 and c.unmapped_hours < 1e-9

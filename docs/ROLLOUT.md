@@ -49,7 +49,13 @@ Sync on Windows: `powershell -ExecutionPolicy Bypass -File .\scripts\sync-github
    read `item_type = 'pr'` only. A diagnostic query (`diag.sql`: teams, work items with allocations, capacity) showed
    10 commits correctly mapped and `raw_hours = 0` in the capacity row. All readers now take `('pr', 'commit')`, and
    the integration test now checks that the P&L loader sees the commit, not just that it was stored.
-5. *No `make` on Windows.* `scripts/sync-github.ps1` does the sync and prints the ledger with PowerShell only.
+5. *After the fix in (4) the API would not start:* `allocations sum to 1.0000 > 1`. Shares are stored as
+   `numeric(6,5)` and were rounded one by one, so six shares of one commit summed to 1.00002 and the effort model's
+   guard stopped the whole recompute (and with it the API's startup). Synthetic data never hit this. Shares are now
+   rounded so their sum never exceeds the exact total (`round_shares`), and stored shares that are over by rounding
+   only (≤ 0.001) are rescaled instead of refused. Lesson: one bad row must not take the service down; tracked as
+   a follow-up (recompute failures should be logged and reported, not fatal at startup).
+6. *No `make` on Windows.* `scripts/sync-github.ps1` does the sync and prints the ledger with PowerShell only.
 
 **Still to do in Stage 1:** check the ledger and tear-sheets on the real data; Zombie-Guard comments and a
 cleanup PR on a test branch of the product repository.

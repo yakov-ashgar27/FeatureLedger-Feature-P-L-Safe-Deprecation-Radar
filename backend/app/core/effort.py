@@ -36,6 +36,10 @@ P0_MULTIPLIER = 3.0
 BUG_KINDS = {WorkKind.BUG, WorkKind.HOTFIX, WorkKind.INCIDENT, WorkKind.REVERT}
 
 
+# shares are stored as numeric(6,5); a handful of independently rounded shares can exceed 1 by a few 1e-5
+ROUNDING_SLACK = 1e-3
+
+
 def type_multiplier(kind: WorkKind, priority: str | None) -> float:
     if kind in (WorkKind.HOTFIX, WorkKind.INCIDENT) and (priority or "").upper() == "P0":
         return P0_MULTIPLIER
@@ -129,8 +133,12 @@ def allocate_effort(
         if wi.is_sweeping:
             c.overhead_hours += hours
             continue
+        allocs = wi.allocations
+        raw_total = sum(v for k, v in allocs.items() if k in known_ids and v > 0)
+        if 1.0 < raw_total <= 1.0 + ROUNDING_SLACK:     # stored shares rounded up a hair: rescale, do not fail
+            allocs = {k: v / raw_total for k, v in allocs.items()}
         share_total = 0.0
-        for fid, share in wi.allocations.items():
+        for fid, share in allocs.items():
             if fid not in known_ids or share <= 0:
                 continue
             share_total += share

@@ -30,6 +30,19 @@ class ManifestError(ValueError):
         self.errors = errors
 
 
+def round_shares(exact: dict[str, float], places: int = 5) -> dict[str, float]:
+    """Round shares to the stored precision (numeric(6,5)) without their sum ever exceeding the exact sum:
+    floor each one, then give the leftover units to the largest remainders. Independent rounding could
+    push six shares of 1/6 to 1.00002, which the effort model rightly refuses."""
+    unit = 10 ** places
+    target = int(sum(exact.values()) * unit + 1e-6)          # floor: never above the exact total
+    floors = {k: int(v * unit + 1e-9) for k, v in exact.items()}
+    left = target - sum(floors.values())
+    for k in sorted(exact, key=lambda k: exact[k] * unit - floors[k], reverse=True)[:max(left, 0)]:
+        floors[k] += 1
+    return {k: n / unit for k, n in floors.items() if n > 0}
+
+
 @lru_cache(maxsize=4096)
 def glob_to_regex(glob: str) -> re.Pattern[str]:
     i, out = 0, []
@@ -154,7 +167,7 @@ class Manifest:
                 per[key] = per.get(key, 0.0) + churn
         if total <= 0:
             return {}, 0
-        return {k: round(v / total, 5) for k, v in per.items()}, int(total)
+        return round_shares({k: v / total for k, v in per.items()}), int(total)
 
 
 def _tuple(v: Any, field_name: str, key: str, errors: list[str]) -> tuple[str, ...]:
