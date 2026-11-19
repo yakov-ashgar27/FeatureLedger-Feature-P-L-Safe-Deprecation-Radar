@@ -74,10 +74,32 @@ async def reset_demo(dsn: str | None = None) -> dict:
                                    WHERE org_id = $1::uuid AND kind <> 'github'""", org_id)
     finally:
         await conn.close()
-    pnl = await recompute_org(org_id)   # app role + RLS: an admin connection would read every tenant
+    converged = await converge(org_id)
+    pnl = converged.get("pnl") or await recompute_org(org_id)   # app role + RLS, never the admin connection
     took = round(time.monotonic() - t0, 1)
     log.info("demo org %s reset in %ss: %s", config.demo_org_slug, took, pnl.get("classes"))
-    return {"org_id": org_id, "slug": config.demo_org_slug, "seconds": took, "pnl": pnl}
+    return {"org_id": org_id, "slug": config.demo_org_slug, "seconds": took, "pnl": pnl,
+            "graph": {k: converged["graph"][k] for k in ("tier2", "tier3")} if converged.get("graph") else None}
+
+
+async def converge(org_id: str) -> dict:
+    """Run one in-process sandbox sync + Feature Graph pass so the demo starts at its steady state.
+
+    The seed SQL is the *pre-inference* state: it carries the facts but not what Tier 2 (code clusters) and
+    Tier 3 (ticket text) infer on the first sync, nor the Jira issues and the `__unresolved__` usage account.
+    Without this step the visitor's first "Trigger Sync" moved ~155 engineering hours and ~79 tickets onto
+    features (+0.4% monthly cost). After it, any further sync over unchanged fixtures changes nothing.
+    """
+    from .connectors.ratelimit import MemoryBucketStore
+    from .connectors.runner import sync_org
+    from .db import org_tx
+    from .jobs.compute_pnl import recompute_org
+    async with org_tx(org_id) as conn:
+        integs = [dict(r) for r in await conn.fetch("""SELECT id, kind::text AS kind, config, sandbox FROM integrations
+                                                       WHERE status <> 'disabled' AND kind <> 'github' AND sandbox""")]
+    if not integs:
+        return {}
+    return await sync_org(org_tx, org_id, integs, "manual", MemoryBucketStore(), recompute_org)
 
 
 async def ensure_demo(conn) -> str | None:

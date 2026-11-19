@@ -71,16 +71,27 @@ for i in kinds:      # one at a time, as a person clicking "Trigger Sync" would
             if not q.get("queued") and not (r and r["status"] == "running"):
                 break        # another org-wide sync held the slot: ask again
     expect(ok, f"{i['kind']} sandbox sync finished")
+def ledger_fingerprint(l):
+    """Every number the ledger shows, per feature, rounded to the cent: equality must be exact."""
+    rows = {f["key"]: (f["classification"], f["margin_bleed"], *(round(float(f[k] or 0), 2) for k in
+            ("c_eng", "c_support", "c_infra", "c_ai_tokens", "c_total", "v_usage", "eng_hours", "adoption")))
+            for f in l["features"]}
+    return l["summary"], rows
+
+
+want = ledger_fingerprint(before)
 same = False
-while time.time() < deadline + 60 and not same:
+while time.time() < deadline + 60 and not same:   # the worker recomputes right after the last sync
     s, after, _ = call("GET", "/api/v1/pnl?window=1", cookie=ADM)
-    a = after["summary"]
-    same = (abs(a["monthly_cost"] - b["monthly_cost"]) <= 0.01 * b["monthly_cost"]
-            and a["zombie_count"] == b["zombie_count"] and a["margin_bleed_features"] == b["margin_bleed_features"])
+    got = ledger_fingerprint(after)
+    same = got == want
     if not same:
         time.sleep(5)
-expect(same, f"after the syncs the demo ledger matches the seed (cost {b['monthly_cost']:.0f} -> {a['monthly_cost']:.0f}, "
-             f"zombies {a['zombie_count']}, margin bleed {a['margin_bleed_features']})")
+a = after["summary"]
+diff = {k: (want[1][k], got[1].get(k)) for k in want[1] if got[1].get(k) != want[1][k]}
+expect(same, f"Trigger Sync over unchanged fixtures is a no-op: monthly cost ${b['monthly_cost']:,.2f} -> "
+             f"${a['monthly_cost']:,.2f} (delta ${a['monthly_cost'] - b['monthly_cost']:,.2f})"
+             + (f"; changed features: {diff}" if diff else ""))
 
 # ---------------------------------------------------------------- Token-Bleed Radar, Zombie-Guard, digest
 s, radar, _ = call("GET", "/api/v1/ai-margin", cookie=PM)

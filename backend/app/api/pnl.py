@@ -46,8 +46,13 @@ async def periods(org: str = Depends(current_org)):
 @router.get("/pnl")
 async def ledger(period: str | None = None, model: Model = "usage_weighted",
                  view: Literal["contribution", "fully_loaded"] = "contribution",
-                 window: int = Query(3, ge=1, le=12), org: str = Depends(current_org)):
-    """Feature P&L matrix. Money columns are monthly averages over the trailing `window` months."""
+                 window: int = Query(3, ge=1, le=12), include_archived: bool = False,
+                 org: str = Depends(current_org)):
+    """Feature P&L matrix. Money columns are monthly averages over the trailing `window` months.
+
+    Archived (sunset) features keep their full monthly history but are hidden by default; pass
+    include_archived=true to list them (flagged `archived: true`). Summary KPIs always describe the
+    live portfolio, so the toggle never changes them."""
     async with org_tx(org) as conn:
         end = parse_period(period) or await _latest(conn)
         months = trailing_months(end, window)
@@ -92,9 +97,11 @@ async def ledger(period: str | None = None, model: Model = "usage_weighted",
             "active_accounts": cur["active_accounts"], "eligible_accounts": cur["eligible_accounts"],
             "anchor_accounts": cur["anchor_accounts"], "revenue_at_risk_arr": cur["revenue_at_risk_arr"],
             "bug_tax_ratio": cur["bug_tax_ratio"], "tickets": round(avg("tickets"), 1),
-            "months": n,
+            "months": n, "archived": cur["status"] == "archived",
         })
     out.sort(key=lambda x: x["net_roi"])
+    archived = [x for x in out if x["archived"]]
+    out = [x for x in out if not x["archived"]]
     product = [x for x in out if not x["is_shared_overhead"]]
     zombies = [x for x in product if x["classification"] == FeatureClass.ZOMBIE.value]
     return {
@@ -114,7 +121,8 @@ async def ledger(period: str | None = None, model: Model = "usage_weighted",
             "eng_capacity_hours": plain(cap["cap"]), "unmapped_eng_hours": plain(cap["unmapped"]),
             "unattributed_eng_hours": plain(cap["unattributed"]),
         },
-        "features": out,
+        "features": out + (archived if include_archived else []),
+        "archived_count": len(archived),
     }
 
 
@@ -180,12 +188,16 @@ async def what_if(body: SimulateIn, org: str = Depends(current_org)):
     async with org_tx(org) as conn:
         end = parse_period(body.period) or await _latest(conn)
         months = trailing_months(end, body.window)
-        feats = await conn.fetch("SELECT id, key, is_shared_overhead, is_regulatory FROM features WHERE key = ANY($1)",
+        feats = await conn.fetch("""SELECT id, key, is_shared_overhead, is_regulatory, status::text AS status
+                                    FROM features WHERE key = ANY($1)""",
                                  body.feature_keys)
         found = {r["key"]: r for r in feats}
         missing = set(body.feature_keys) - set(found)
         if missing:
             raise HTTPException(404, f"unknown features: {sorted(missing)}")
+        gone = [k for k, r in found.items() if r["status"] == "archived"]
+        if gone:
+            raise HTTPException(422, f"already archived: {sorted(gone)}")
         blocked = [k for k, r in found.items() if r["is_shared_overhead"] or r["is_regulatory"]]
         if blocked:
             raise HTTPException(422, f"cannot simulate sunsetting platform/regulatory features: {blocked}")
@@ -238,6 +250,7 @@ async def ai_margin(months: int = Query(6, ge=1, le=24), org: str = Depends(curr
                    p.active_accounts, p.eligible_accounts, p.classification::text AS classification
               FROM feature_pnl_monthly p JOIN features f ON f.id = p.feature_id
              WHERE p.feature_id IN (SELECT feature_id FROM feature_pnl_monthly WHERE c_ai_tokens > 0)
+               AND f.status <> 'archived'
                AND p.period_month > (SELECT max(period_month) FROM feature_pnl_monthly) - make_interval(months => $1)
              ORDER BY f.key, p.period_month""", months)
         thresholds = await conn.fetchrow("""SELECT margin_bleed_min_adoption, margin_bleed_max_gross_margin

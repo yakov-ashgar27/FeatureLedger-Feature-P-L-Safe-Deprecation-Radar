@@ -28,7 +28,9 @@
 | ![Ledger with demo banner and Token-Bleed Radar](docs/img/demo-ledger.png) | ![AI gross margin on the tear-sheet](docs/img/demo-tearsheet-ai.png) |
 | ![Zombie-Guard preview](docs/img/demo-zombie-guard.png) | ![Executive Brief](docs/img/demo-brief.png) |
 
-The demo tenant only ever uses sandbox providers (flags, GitHub, PR comments, Slack), even on a deployment
+A reset re-seeds the tenant, then runs one in-process sandbox sync and Feature Graph pass, so the demo starts
+at its steady state. After that, *Trigger Sync* changes nothing: CI checks every ledger number for an exact,
+cent-for-cent match. The demo tenant only ever uses sandbox providers (flags, GitHub, PR comments, Slack), even on a deployment
 configured with real credentials, and its sessions cannot reach any other tenant (Postgres RLS). Turn it off
 with `DEMO_MODE=false` on a production deployment.
 
@@ -196,6 +198,9 @@ The same walkthrough runs headless in CI: `make e2e` (or `python3 scripts/e2e_ph
 
 ## Going live
 
+With `SANDBOX_MODE=false` the API, the worker and the migrations **refuse to start** if `DEMO_MODE=true` or if
+`SESSION_SECRET` is missing, blank or shorter than 32 characters. The error lists every problem at once.
+
 | Piece | Set in `.env` |
 | --- | --- |
 | Connectors (Phase 2) | `SANDBOX_MODE=false` + each vendor's read-only credentials (scopes listed in `.env.example`) |
@@ -207,6 +212,10 @@ The same walkthrough runs headless in CI: `make e2e` (or `python3 scripts/e2e_ph
 | Public demo | `DEMO_MODE=true` only on a deployment meant for visitors; `false` wherever real data lives |
 
 ## Earlier phases in one paragraph each
+
+**Archived features keep their history.** A sunset feature's monthly P&L rows survive every recompute, so the
+before-and-after is visible on its tear-sheet. The ledger hides archived features by default: use
+*Show archived* or `GET /api/v1/pnl?include_archived=true`. Summary KPIs always describe the live portfolio.
 
 **Phase 1.** A pure engine computes each feature's monthly cost (calibrated engineering effort, support,
 infra, LLM) and value (usage-weighted, tier-gated or critical-dependency attribution), classifies it

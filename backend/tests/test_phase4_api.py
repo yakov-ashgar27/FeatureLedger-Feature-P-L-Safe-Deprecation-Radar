@@ -223,6 +223,9 @@ def test_scream_test_guards_then_cleanup_pr_then_merge_archives(client, tokens):
     detail = client.get(f"/api/v1/sunset-plans/{zap}", headers=A).json()
     assert [x["state"] for x in detail["pull_requests"]] == ["open"]
 
+    history_before = client.get("/api/v1/features/zapier-v1-webhooks", headers=A).json()["history"]
+    assert len(history_before) == 6
+
     # 4) GitHub says the PR merged -> plan archived, feature archived, audit by the webhook
     integ = next(i for i in client.get("/api/v1/integrations", headers=A).json()["integrations"] if i["kind"] == "github")
     payload = {"action": "closed", "number": pr["number"], "repository": {"full_name": pr["repo"]},
@@ -246,6 +249,24 @@ def test_scream_test_guards_then_cleanup_pr_then_merge_archives(client, tokens):
                         headers={"X-GitHub-Event": "pull_request", "X-FeatureLedger-Secret": "sandbox"})
     assert again.json().get("already_merged") is True
     assert_hash_chain(final["audit_log"])
+
+    # 5) archiving keeps the feature's monthly P&L history, even through a full recompute
+    assert client.post("/api/v1/jobs/compute-pnl", headers=A).status_code == 200
+    history_after = client.get("/api/v1/features/zapier-v1-webhooks", headers=A).json()["history"]
+    money = ("period_month", "eng_hours", "c_eng", "c_support", "c_infra", "c_ai_tokens", "c_total", "v_usage",
+             "classification")
+    assert [{k: h[k] for k in money} for h in history_after] == [{k: h[k] for k in money} for h in history_before]
+    assert len(history_after) == 6 and history_after[-1]["c_total"] > 0
+    # the ledger hides it by default and shows it on request; the KPIs describe the live portfolio either way
+    default = client.get("/api/v1/pnl?window=3", headers=A).json()
+    shown = client.get("/api/v1/pnl?window=3&include_archived=true", headers=A).json()
+    assert "zapier-v1-webhooks" not in {f["key"] for f in default["features"]}
+    zap_row = next(f for f in shown["features"] if f["key"] == "zapier-v1-webhooks")
+    assert zap_row["archived"] is True and zap_row["c_total"] > 0
+    assert default["archived_count"] == shown["archived_count"] >= 1
+    assert default["summary"] == shown["summary"] and default["summary"]["zombie_count"] == 2
+    r = client.post("/api/v1/simulate", json={"feature_keys": ["zapier-v1-webhooks"]}, headers=A)
+    assert r.status_code == 422 and "already archived" in r.text
 
 
 def assert_hash_chain(log):

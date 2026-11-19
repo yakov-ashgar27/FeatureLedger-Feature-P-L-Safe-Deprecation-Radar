@@ -152,6 +152,21 @@ def test_demo_launch_switch_and_isolation(client):
     assert all(p["feature_key"] != "legacy-pdf-export" for p in after)
     led = client.get("/api/v1/pnl?window=1", headers=H(t)).json()
     assert led["summary"]["zombie_count"] == 3 and led["summary"]["margin_bleed_features"] == ["ai-summaries"]
+    # zero drift: a reset leaves the demo at its steady state, so another full sandbox sync (connectors,
+    # inbox, Tier 2 + Tier 3, recompute) changes nothing at all, not even by a cent
+    from app.demo import converge
+    full = "/api/v1/pnl?window=6&include_archived=true"
+    before = client.get(full, headers=H(t)).json()
+    sheets_before = {k: client.get(f"/api/v1/features/{k}", headers=H(t)).json()["history"]
+                     for k in ("ai-summaries", "legacy-pdf-export", "document-editor")}
+    resync = client.portal.call(converge, me["org"]["id"])
+    assert resync["processing"]["processed"] > 0 or resync["runs"]          # it really ran
+    after = client.get(full, headers=H(t)).json()
+    assert after == before
+    assert after["summary"]["monthly_cost"] - before["summary"]["monthly_cost"] == 0
+    for k, hist in sheets_before.items():
+        assert client.get(f"/api/v1/features/{k}", headers=H(t)).json()["history"] == hist
+
     # the real tenant was untouched by the reset (regression: an admin-connection recompute once wiped every ledger)
     assert client.get("/api/v1/sunset-plans", headers=H(real)).json() == real_plans
     assert client.get("/api/v1/pnl?window=3", headers=H(real)).json() == real_ledger

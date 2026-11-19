@@ -82,6 +82,7 @@ export function LedgerTable({ rows }: { rows: LedgerRow[] }) {
                   <div className="text-xs text-ink-3">
                     {r.team}{r.tier_gate ? ` · ${r.tier_gate}` : ""}
                     {r.sunset_state ? <span className="ml-1 text-[#b4471c]">· {STATE_LABEL[r.sunset_state]}</span> : null}
+                    {r.archived ? <span className="ml-1 rounded bg-[#efeee9] px-1.5 py-px text-[10px] uppercase tracking-wide text-ink-3">archived</span> : null}
                   </div>
                 </td>
                 <td className="px-3 py-2.5" title={r.classification_reason}>

@@ -48,7 +48,9 @@ async def load_dataset(conn: asyncpg.Connection, months: list[date]) -> Dataset:
         is_shared_overhead=r["is_shared_overhead"], allocation_rule=r["allocation_rule"],
         allocation_weights=r["allocation_weights"], is_regulatory=r["is_regulatory"], launched_at=r["launched_at"],
         flag_key=r["flag_key"]) for r in await conn.fetch(
-            "SELECT * FROM features WHERE status <> 'archived' ORDER BY key")]
+            # archived features stay in: their history must survive every recompute (and their engineering
+            # hours must keep counting toward capacity); views hide them by default instead
+            "SELECT * FROM features ORDER BY key")]
     work_items = [WorkItem(
         id=str(r["id"]), team_id=str(r["team_id"]), period_month=r["period_month"], kind=WorkKind(r["kind"]),
         priority=r["priority"], additions=r["additions"], deletions=r["deletions"],

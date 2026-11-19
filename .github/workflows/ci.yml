@@ -17,10 +17,29 @@ jobs:
       - run: pip install -r backend/requirements.txt
       - name: unit + engine tests
         run: cd backend && python -m pytest
-      - name: migrate, seed (full data set) and compute against real Postgres
+      - name: production config is refused before anything starts
+        env:
+          SANDBOX_MODE: "false"
+          DEMO_MODE: "true"
+          SESSION_SECRET: "too-short"
+          ADMIN_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/featureledger
+        run: |
+          cd backend
+          if python -m app.migrate > guard.log 2>&1; then echo "migrate accepted an unsafe production config"; exit 1; fi
+          cat guard.log
+          grep -q "refusing to start with SANDBOX_MODE=false" guard.log
+          grep -q "DEMO_MODE=true" guard.log && grep -q "SESSION_SECRET is 9 characters" guard.log
+      - name: migrate, seed (full data set) and compute against real Postgres (production settings)
         env:
           ADMIN_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/featureledger
           SANDBOX_MODE: "false"
+          DEMO_MODE: "false"
+          SESSION_SECRET: ci-only-session-secret-0123456789abcdef
+        run: cd backend && python -m app.migrate
+      - name: create the live-demo tenant (sandbox settings; converges with an in-process sandbox sync)
+        env:
+          ADMIN_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/featureledger
+          SANDBOX_MODE: "true"
           DEMO_MODE: "true"
         run: cd backend && python -m app.migrate
       - name: RLS blocks reads without a tenant

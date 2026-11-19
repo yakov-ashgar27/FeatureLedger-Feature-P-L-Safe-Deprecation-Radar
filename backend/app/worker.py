@@ -140,6 +140,8 @@ async def schedule_due_syncs(ctx: dict) -> dict:
 
 async def startup(ctx: dict) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    from .config import assert_safe_to_start
+    assert_safe_to_start()
     await init_pool()
 
 

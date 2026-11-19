@@ -110,6 +110,11 @@ async def ensure_live_integrations(conn: asyncpg.Connection, org_id: str) -> lis
 
 async def main(seed: bool) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    from .config import ConfigError, assert_safe_to_start
+    try:
+        assert_safe_to_start()
+    except ConfigError as e:
+        raise SystemExit(str(e)) from e
     for attempt in range(30):  # wait for postgres in docker-compose
         try:
             conn = await asyncpg.connect(config.admin_database_url, server_settings={"jit": "off"})

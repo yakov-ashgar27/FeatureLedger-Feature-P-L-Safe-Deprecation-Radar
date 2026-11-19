@@ -449,6 +449,16 @@ plan is leaving: candidate → `sunset:blast_radius` (PM/TL, admin); blast_radiu
   - user edits and the real GitHub sync are refused in the demo.
 - **Providers:** `orchestrator.providers_for` and `org_is_demo` force the sandbox flag, GitHub, comment and Slack providers for the demo org.
 
+### 13.5 Hardening
+
+- **Zero-drift sync.** The seed SQL is the pre-inference state. The first sync's Tier 2 cluster and Tier 3
+  tickets moved ~155 h and 79 tickets onto features, which looked like a +0.4% "drift". `reset_demo` now runs one
+  in-process sandbox sync (`demo.converge`); a second sync over unchanged fixtures is a no-op to the cent.
+- **Fail-closed startup** (`config.assert_safe_to_start`, called by the API lifespan, the worker and migrate):
+  with `SANDBOX_MODE=false` it refuses `DEMO_MODE=true` and a `SESSION_SECRET` that is missing, blank or under 32 characters.
+- **Archived history.** Recompute includes archived features, so their rows and the capacity conservation survive.
+  `/pnl` (`include_archived=false` by default), the digest, the radar and the simulator exclude them.
+
 ## 14. Not built yet
 
 - Linear, Mixpanel/Amplitude, HubSpot/Salesforce, Intercom and GCP connectors (same contract as the Phase 2 five).

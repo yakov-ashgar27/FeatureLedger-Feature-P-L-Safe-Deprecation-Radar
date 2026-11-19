@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .api import admin, auth, demo, flags, graph, guard, imports, integrations, pnl, reports, sunset
-from .config import config
+from .config import assert_safe_to_start, config
 from .db import close_pool, init_pool, org_tx
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -15,6 +15,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    assert_safe_to_start()            # before any connection is opened or any route is served
     await init_pool()
     yield
     await close_pool()

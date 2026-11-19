@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Suspense } from "react";
 import { Segmented } from "@/components/Controls";
 import { LedgerTable } from "@/components/LedgerTable";
@@ -10,14 +11,18 @@ import type { AiMargin, Ledger } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-type SP = { model?: string; view?: string; window?: string; period?: string };
+type SP = { model?: string; view?: string; window?: string; period?: string; include_archived?: string };
 
 export default async function LedgerPage({ searchParams }: { searchParams: Promise<SP> }) {
   const sp = await searchParams;
   const model = sp.model ?? "usage_weighted";
   const view = sp.view ?? "contribution";
   const win = sp.window ?? "3";
-  const qs = new URLSearchParams({ model, view, window: win, ...(sp.period ? { period: sp.period } : {}) });
+  const showArchived = sp.include_archived === "true";
+  const qs = new URLSearchParams({ model, view, window: win, ...(sp.period ? { period: sp.period } : {}),
+    ...(showArchived ? { include_archived: "true" } : {}) });
+  const toggle = new URLSearchParams(qs);
+  if (showArchived) toggle.delete("include_archived"); else toggle.set("include_archived", "true");
 
   const [res, radar] = await Promise.all([
     serverLoad<Ledger>(`/api/v1/pnl?${qs}`, `/?${qs}`),
@@ -74,11 +79,15 @@ export default async function LedgerPage({ searchParams }: { searchParams: Promi
       <section className="card p-5">
         <SectionTitle title="Cost vs. value"
           sub="Each dot is a feature. Below the dashed line it costs more than it earns. Click a dot for its tear-sheet." />
-        <QuadrantScatter rows={data.features} />
+        <QuadrantScatter rows={data.features.filter((f) => !f.archived)} />
       </section>
 
       <section>
-        <SectionTitle title="Ledger" sub="Sorted by net monthly result, worst first. Hover a class to see why it was assigned." />
+        <SectionTitle title="Ledger" sub="Sorted by net monthly result, worst first. Hover a class to see why it was assigned."
+          right={data.archived_count > 0 ? (
+            <Link href={`/?${toggle}`} className="btn text-xs" data-testid="toggle-archived" scroll={false}>
+              {showArchived ? "Hide archived" : `Show archived (${data.archived_count})`}
+            </Link>) : undefined} />
         <LedgerTable rows={data.features} />
       </section>
     </div>

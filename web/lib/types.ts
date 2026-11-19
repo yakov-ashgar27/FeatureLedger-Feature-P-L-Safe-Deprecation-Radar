@@ -22,6 +22,7 @@ export interface LedgerRow {
   c_support: number;
   c_infra: number;
   c_ai_tokens: number;
+  archived?: boolean;
   gross_margin_pct: number | null;
   margin_bleed: boolean;
   margin_bleed_reason?: string | null;
@@ -62,6 +63,7 @@ export interface Ledger {
     unattributed_eng_hours: number;
   };
   features: LedgerRow[];
+  archived_count: number;
 }
 
 export interface PnlMonth {

@@ -374,7 +374,7 @@ docker compose up -d --build
 | משתנה | מה לרשום |
 | --- | --- |
 | `APP_URL` | הכתובת שבה פותחים את הדשבורד, למשל `https://featureledger.mycompany.com` |
-| `SESSION_SECRET` | מחרוזת סודית ארוכה: `openssl rand -base64 48`. **חובה** מחוץ לדמו |
+| `SESSION_SECRET` | מחרוזת סודית ארוכה: `openssl rand -base64 48`. **חובה** מחוץ לדמו: עם `SANDBOX_MODE=false` המערכת מסרבת לעלות אם המחרוזת חסרה או קצרה מ-32 תווים, או אם `DEMO_MODE=true` |
 | `OIDC_PROVIDER` | `okta`, `google` או `auth0` |
 | `OIDC_ISSUER` | Okta: `https://<החברה>.okta.com/oauth2/default` · Auth0: `https://<tenant>.us.auth0.com/` · Google: לא צריך |
 | `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | מהאפליקציה שיוצרים אצל ספק ה-SSO |

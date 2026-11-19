@@ -57,7 +57,7 @@ async def build_digest(conn, period: date) -> dict[str, Any]:
                win.c, win.h, win.v, win.ai, win.infra
           FROM features f JOIN feature_pnl_monthly cur ON cur.feature_id = f.id AND cur.period_month = $1
           JOIN win ON win.feature_id = f.id
-         WHERE NOT f.is_shared_overhead""", latest) if latest else []
+         WHERE NOT f.is_shared_overhead AND f.status <> 'archived'""", latest) if latest else []
 
     zombies = [r for r in feats if r["classification"] == "zombie"]
     outstanding = {

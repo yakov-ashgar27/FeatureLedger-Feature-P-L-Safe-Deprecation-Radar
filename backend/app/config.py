@@ -85,4 +85,34 @@ class Config:
         return self.app_url.startswith("https://")
 
 
+MIN_SESSION_SECRET = 32
+
+
+class ConfigError(RuntimeError):
+    """Unsafe production configuration: the process refuses to start."""
+
+
+def production_problems(cfg: Config) -> list[str]:
+    """Settings that are tolerable in a sandbox but must never reach a deployment holding real data."""
+    if cfg.sandbox_mode:
+        return []
+    problems = []
+    if cfg.demo_mode:
+        problems.append("DEMO_MODE=true exposes a public, login-free demo tenant; set DEMO_MODE=false")
+    secret = (cfg.session_secret or "").strip()
+    if not secret:
+        problems.append("SESSION_SECRET is missing or blank; generate one with: openssl rand -base64 48")
+    elif len(secret) < MIN_SESSION_SECRET:
+        problems.append(f"SESSION_SECRET is {len(secret)} characters; use at least {MIN_SESSION_SECRET} "
+                        "(openssl rand -base64 48)")
+    return problems
+
+
+def assert_safe_to_start(cfg: Config | None = None) -> None:
+    """Fail closed: with SANDBOX_MODE=false, refuse to start on an unsafe configuration."""
+    problems = production_problems(cfg or config)
+    if problems:
+        raise ConfigError("refusing to start with SANDBOX_MODE=false:\n  - " + "\n  - ".join(problems))
+
+
 config = Config()
