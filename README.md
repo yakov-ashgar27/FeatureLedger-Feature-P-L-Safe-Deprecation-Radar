@@ -5,6 +5,8 @@
 
 **Run it with one click:** press *Open in GitHub Codespaces*. The whole stack builds and starts in the cloud, and the dashboard opens by itself in 3–6 minutes. Nothing to install. Press **Launch Live Demo (Acme Cloud — 45 Engineers)**: no sign-up, no setup.
 
+📐 **System design:** [DFD (levels 0–1) and ERD of all 37 tables](docs/DIAGRAMS.md), drawn from the code.
+
 ## Live demo in 30 seconds
 
 ![Landing: one-click live demo](docs/img/demo-landing.png)
